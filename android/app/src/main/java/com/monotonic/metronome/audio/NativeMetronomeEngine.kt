@@ -51,6 +51,20 @@ class NativeMetronomeEngine {
         )
     }
 
+    fun setAccentBitmask(bitmask: Int) {
+        val handle = nativeHandle
+        if (handle != 0L) {
+            nativeSetAccentBitmask(handle, bitmask)
+        }
+    }
+
+    fun setSoundProfile(profileIndex: Int) {
+        val handle = nativeHandle
+        if (handle != 0L) {
+            nativeSetSoundProfile(handle, profileIndex)
+        }
+    }
+
     fun getCurrentBeatIndex(): Int {
         val handle = nativeHandle
         return if (handle != 0L) nativeGetCurrentBeatIndex(handle) else -1
@@ -110,6 +124,8 @@ class NativeMetronomeEngine {
         volume: Float,
         stateVersion: Long
     )
+    private external fun nativeSetAccentBitmask(handle: Long, bitmask: Int)
+    private external fun nativeSetSoundProfile(handle: Long, profileIndex: Int)
     private external fun nativeGetCurrentBeatIndex(handle: Long): Int
     private external fun nativeGetBeatSequence(handle: Long): Long
     private external fun nativeGetMeasuredHardwareLatencyMs(handle: Long): Double

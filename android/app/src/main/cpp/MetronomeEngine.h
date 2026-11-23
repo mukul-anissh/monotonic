@@ -78,6 +78,15 @@ public:
 
     void updateTransport(const TransportParams& params);
 
+    void setAccentBitmask(uint32_t mask) noexcept {
+        mAccentBitmask.store(mask, std::memory_order_relaxed);
+    }
+
+    void setSoundProfile(int32_t profileIndex) noexcept {
+        const int32_t clamped = profileIndex < 0 ? 0 : (profileIndex > 2 ? 2 : profileIndex);
+        mSoundProfile.store(clamped, std::memory_order_relaxed);
+    }
+
     int32_t getCurrentBeatIndex() const noexcept {
         return mCurrentBeatIndex.load(std::memory_order_relaxed);
     }
@@ -112,6 +121,7 @@ public:
 
 private:
     struct ActiveVoice {
+        SoundProfile profile{SoundProfile::DigitalClick};
         ClickType type{ClickType::Regular};
         size_t pos{0};
         bool active{false};
@@ -119,7 +129,7 @@ private:
 
     bool openAndStartLocked();
     void closeStreamLocked();
-    void triggerClick(ClickType type) noexcept;
+    void triggerClick(SoundProfile profile, ClickType type) noexcept;
 
     std::mutex mStreamMutex;
     std::mutex mControlMutex;
@@ -141,6 +151,10 @@ private:
     bool mSawPreStart{false};
     static constexpr size_t kMaxVoices = 4;
     std::array<ActiveVoice, kMaxVoices> mVoices{};
+
+    // Lock-free local sound & accent preferences
+    std::atomic<uint32_t> mAccentBitmask{0x55555556u};
+    std::atomic<int32_t> mSoundProfile{0};
 
     // Lock-free diagnostics exposed to Kotlin UI
     std::atomic<int32_t> mCurrentBeatIndex{-1};

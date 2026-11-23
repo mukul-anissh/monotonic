@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -14,8 +15,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.monotonic.metronome.ui.MetronomeViewModel
-import com.monotonic.metronome.ui.screens.LobbyScreen
-import com.monotonic.metronome.ui.screens.RoomScreen
+import com.monotonic.metronome.ui.screens.MetronomeScreen
+import com.monotonic.metronome.ui.screens.SettingsScreen
 import com.monotonic.metronome.ui.theme.DarkBackground
 import com.monotonic.metronome.ui.theme.MonotonicTheme
 
@@ -33,35 +34,53 @@ class MainActivity : ComponentActivity() {
         setContent {
             MonotonicTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                val activeRoom = uiState.activeRoom
+
+                BackHandler(enabled = uiState.showSettings) {
+                    viewModel.closeSettings()
+                }
 
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(DarkBackground)
                 ) {
-                    if (activeRoom == null) {
-                        LobbyScreen(
+                    if (uiState.showSettings) {
+                        SettingsScreen(
                             uiState = uiState,
+                            onBack = viewModel::closeSettings,
+                            onMasterVolumeChanged = viewModel::onMasterVolumeChanged,
+                            onClickSoundSelected = viewModel::onClickSoundSelected,
+                            onVisualBeatFlashChanged = viewModel::onVisualBeatFlashChanged,
+                            onManualOffsetChanged = viewModel::onManualOffsetChanged,
+                            onResyncNow = viewModel::resyncNow,
                             onServerUrlChanged = viewModel::onServerUrlChanged,
-                            onRoomCodeChanged = viewModel::onRoomCodeInputChanged,
-                            onCreateRoom = viewModel::createRoom,
-                            onJoinRoom = viewModel::joinRoom
+                            onLeaveRoom = viewModel::leaveRoom,
+                            onOpenRoomSheetFromSettings = {
+                                viewModel.closeSettings()
+                                viewModel.openRoomSheet()
+                            }
                         )
                     } else {
-                        RoomScreen(
+                        MetronomeScreen(
                             uiState = uiState,
-                            room = activeRoom,
                             readCurrentBeatIndex = viewModel::readCurrentBeatIndex,
                             readBeatSequence = viewModel::readBeatSequence,
                             onTogglePlayStop = viewModel::togglePlayStop,
                             onUpdateBpm = viewModel::updateBpm,
+                            onNudgeBpm = viewModel::nudgeBpm,
                             onTapTempo = viewModel::onTapTempo,
                             onUpdateBeatsPerBar = viewModel::updateBeatsPerBar,
                             onUpdateSubdivision = viewModel::updateSubdivision,
-                            onManualOffsetChanged = viewModel::onManualOffsetChanged,
-                            onResyncNow = viewModel::resyncNow,
-                            onLeaveRoom = viewModel::leaveRoom
+                            onCycleBeatAccent = viewModel::cycleBeatAccent,
+                            onOpenRoomSheet = viewModel::openRoomSheet,
+                            onDismissRoomSheet = viewModel::dismissRoomSheet,
+                            onOpenSettings = viewModel::openSettings,
+                            onServerUrlChanged = viewModel::onServerUrlChanged,
+                            onRoomCodeChanged = viewModel::onRoomCodeInputChanged,
+                            onCreateRoom = viewModel::createRoom,
+                            onJoinRoom = viewModel::joinRoom,
+                            onShowSnackbar = viewModel::showSnackbar,
+                            onConsumeSnackbar = viewModel::consumeSnackbar
                         )
                     }
                 }

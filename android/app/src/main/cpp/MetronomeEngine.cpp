@@ -161,15 +161,13 @@ void MetronomeEngine::onErrorAfterClose(oboe::AudioStream* /*audioStream*/, oboe
     }
 }
 
-void MetronomeEngine::triggerClick(ClickType type) noexcept {
+void MetronomeEngine::triggerClick(SoundProfile profile, ClickType type) noexcept {
     size_t targetIdx = 0;
     size_t maxPos = 0;
-    bool foundFree = false;
 
     for (size_t i = 0; i < kMaxVoices; ++i) {
         if (!mVoices[i].active) {
             targetIdx = i;
-            foundFree = true;
             break;
         }
         if (mVoices[i].pos >= maxPos) {
@@ -178,7 +176,7 @@ void MetronomeEngine::triggerClick(ClickType type) noexcept {
         }
     }
 
-    (void)foundFree;
+    mVoices[targetIdx].profile = profile;
     mVoices[targetIdx].type = type;
     mVoices[targetIdx].pos = 0;
     mVoices[targetIdx].active = true;
@@ -197,6 +195,8 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
     }
     std::fill(out, out + numFrames, 0.0f);
 
+    const int64_t nowNs = readClockMonotonicNs();
+
     TransportParams incoming{};
     if (mTransportBuffer.consume(incoming)) {
         if (incoming.stateVersion != mLastAppliedStateVersion) {
@@ -212,7 +212,9 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
                 const int64_t activeEffective =
                     mActiveSchedule.localStartTimeNs + mActiveSchedule.manualOffsetNs;
 
-                if (mActiveSchedule.isPlaying && incomingEffective > activeEffective) {
+                if (mActiveSchedule.isPlaying &&
+                    incomingEffective > nowNs &&
+                    incomingEffective > activeEffective) {
                     mPendingSchedule = incoming;
                     mHasPending = true;
                 } else {
@@ -242,7 +244,6 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
 
     const int32_t sampleRate = std::max(audioStream->getSampleRate(), 8000);
     const int64_t bufferStartFrame = audioStream->getFramesWritten();
-    const int64_t nowNs = readClockMonotonicNs();
 
     int64_t timestampFramePosition = 0;
     int64_t timestampTimeNs = 0;
@@ -280,9 +281,11 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
             nowNs + static_cast<int64_t>(std::llround(latencyMs * 1000000.0));
     }
 
-    const std::vector<float>& accentBuf = mClickSynth.getBuffer(ClickType::Accent);
-    const std::vector<float>& regularBuf = mClickSynth.getBuffer(ClickType::Regular);
-    const std::vector<float>& subBuf = mClickSynth.getBuffer(ClickType::Subdivision);
+    const uint32_t accentBitmask = mAccentBitmask.load(std::memory_order_relaxed);
+    const int32_t rawProfile = mSoundProfile.load(std::memory_order_relaxed);
+    const SoundProfile activeProfile = static_cast<SoundProfile>(
+        rawProfile < 0 ? 0 : (rawProfile > 2 ? 2 : rawProfile)
+    );
 
     for (int32_t i = 0; i < numFrames; ++i) {
         const int64_t framePlayTimeNs = useHardwareTimestamp
@@ -302,8 +305,10 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
             }
         }
 
-        if (mActiveSchedule.isPlaying && mActiveSchedule.bpm > 0.0 &&
-            mActiveSchedule.beatsPerBar > 0 && mActiveSchedule.subdivision > 0) {
+        if (mActiveSchedule.isPlaying &&
+            mActiveSchedule.bpm >= 20.0 && mActiveSchedule.bpm <= 500.0 &&
+            mActiveSchedule.beatsPerBar >= 1 && mActiveSchedule.beatsPerBar <= 16 &&
+            mActiveSchedule.subdivision >= 1 && mActiveSchedule.subdivision <= 4) {
             const int64_t effectiveStartNs =
                 mActiveSchedule.localStartTimeNs + mActiveSchedule.manualOffsetNs;
 
@@ -336,22 +341,26 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
 
                 if (shouldTrigger) {
                     mLastTriggeredStep = stepIndex;
-                    const int64_t stepsPerBar =
-                        static_cast<int64_t>(mActiveSchedule.beatsPerBar) *
-                        static_cast<int64_t>(mActiveSchedule.subdivision);
+                    const int32_t beatIdx = static_cast<int32_t>(
+                        (stepIndex / mActiveSchedule.subdivision) % mActiveSchedule.beatsPerBar
+                    );
+                    const uint32_t accentLevel = (beatIdx >= 0 && beatIdx < 16)
+                        ? ((accentBitmask >> (static_cast<uint32_t>(beatIdx) * 2u)) & 0x3u)
+                        : 1u;
+                    const bool isMainBeat = (stepIndex % mActiveSchedule.subdivision == 0);
 
-                    if (stepIndex % stepsPerBar == 0) {
-                        triggerClick(ClickType::Accent);
-                    } else if (stepIndex % mActiveSchedule.subdivision == 0) {
-                        triggerClick(ClickType::Regular);
-                    } else {
-                        triggerClick(ClickType::Subdivision);
+                    if (accentLevel != 0u) {
+                        if (isMainBeat) {
+                            triggerClick(
+                                activeProfile,
+                                accentLevel >= 2u ? ClickType::Accent : ClickType::Regular
+                            );
+                        } else {
+                            triggerClick(activeProfile, ClickType::Subdivision);
+                        }
                     }
 
-                    if (stepIndex % mActiveSchedule.subdivision == 0) {
-                        const int32_t beatIdx = static_cast<int32_t>(
-                            (stepIndex / mActiveSchedule.subdivision) % mActiveSchedule.beatsPerBar
-                        );
+                    if (isMainBeat) {
                         mCurrentBeatIndex.store(beatIdx, std::memory_order_relaxed);
                         mBeatSequence.fetch_add(1, std::memory_order_relaxed);
                     }
@@ -364,18 +373,12 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
             ActiveVoice& voice = mVoices[v];
             if (!voice.active) continue;
 
-            const std::vector<float>* buf = &regularBuf;
-            if (voice.type == ClickType::Accent) {
-                buf = &accentBuf;
-            } else if (voice.type == ClickType::Subdivision) {
-                buf = &subBuf;
-            }
-
-            if (voice.pos < buf->size()) {
-                mix += (*buf)[voice.pos];
+            const std::vector<float>& buf = mClickSynth.getBuffer(voice.profile, voice.type);
+            if (voice.pos < buf.size()) {
+                mix += buf[voice.pos];
                 ++voice.pos;
             }
-            if (voice.pos >= buf->size()) {
+            if (voice.pos >= buf.size()) {
                 voice.active = false;
             }
         }

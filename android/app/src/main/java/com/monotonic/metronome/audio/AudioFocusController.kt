@@ -6,22 +6,23 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 
 /**
- * Manages Android AudioFocus for active metronome sessions so ducking or
- * transient interruptions are handled cleanly.
+ * Manages Android AudioFocus for active metronome sessions using a normalized
+ * gain multiplier (`1.0f` full, `0.35f` ducked, `0.0f` muted) so user master
+ * volume preferences remain intact.
  */
 class AudioFocusController(
     context: Context,
-    private val onVolumeScaleChanged: (Float) -> Unit
+    private val onFocusGainChanged: (Float) -> Unit
 ) {
     private val audioManager =
         context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
-            AudioManager.AUDIOFOCUS_GAIN -> onVolumeScaleChanged(DEFAULT_VOLUME)
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> onVolumeScaleChanged(DUCKED_VOLUME)
+            AudioManager.AUDIOFOCUS_GAIN -> onFocusGainChanged(GAIN_FULL)
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> onFocusGainChanged(GAIN_DUCKED)
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS -> onVolumeScaleChanged(MUTED_VOLUME)
+            AudioManager.AUDIOFOCUS_LOSS -> onFocusGainChanged(GAIN_MUTED)
         }
     }
 
@@ -44,7 +45,7 @@ class AudioFocusController(
         val res = audioManager.requestAudioFocus(focusRequest)
         hasFocus = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
         if (hasFocus) {
-            onVolumeScaleChanged(DEFAULT_VOLUME)
+            onFocusGainChanged(GAIN_FULL)
         }
         return hasFocus
     }
@@ -56,8 +57,8 @@ class AudioFocusController(
     }
 
     companion object {
-        const val DEFAULT_VOLUME = 0.85f
-        const val DUCKED_VOLUME = 0.30f
-        const val MUTED_VOLUME = 0.0f
+        const val GAIN_FULL = 1.0f
+        const val GAIN_DUCKED = 0.35f
+        const val GAIN_MUTED = 0.0f
     }
 }

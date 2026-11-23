@@ -94,6 +94,32 @@ Java_com_monotonic_metronome_audio_NativeMetronomeEngine_nativeUpdateTransport(
     engine->updateTransport(params);
 }
 
+JNIEXPORT void JNICALL
+Java_com_monotonic_metronome_audio_NativeMetronomeEngine_nativeSetAccentBitmask(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/,
+    jlong handle,
+    jint bitmask
+) {
+    auto* engine = fromHandle(handle);
+    if (engine) {
+        engine->setAccentBitmask(static_cast<uint32_t>(bitmask));
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_monotonic_metronome_audio_NativeMetronomeEngine_nativeSetSoundProfile(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/,
+    jlong handle,
+    jint profileIndex
+) {
+    auto* engine = fromHandle(handle);
+    if (engine) {
+        engine->setSoundProfile(static_cast<int32_t>(profileIndex));
+    }
+}
+
 JNIEXPORT jint JNICALL
 Java_com_monotonic_metronome_audio_NativeMetronomeEngine_nativeGetCurrentBeatIndex(
     JNIEnv* /*env*/,

@@ -224,18 +224,77 @@ def test_update_transport_while_stopped_and_bounds_validation() -> None:
         assert updated["state_version"] == 2
 
         invalid_payloads = [
-            {"type": "update_transport", "bpm": 29.0},
-            {"type": "update_transport", "bpm": 301.0},
+            {"type": "update_transport", "bpm": 19.9},
+            {"type": "update_transport", "bpm": 500.1},
             {"type": "update_transport", "bpm": True},
-            {"type": "update_transport", "beats_per_bar": 1},
-            {"type": "update_transport", "beats_per_bar": 13},
-            {"type": "update_transport", "subdivision": 3},
+            {"type": "update_transport", "beats_per_bar": 0},
+            {"type": "update_transport", "beats_per_bar": 17},
+            {"type": "update_transport", "subdivision": 0},
+            {"type": "update_transport", "subdivision": 5},
         ]
         for payload in invalid_payloads:
             ws.send_json(payload)
             err = ws.receive_json()
             assert err["type"] == "error"
             assert err["code"] == "invalid_transport"
+
+
+def test_500_bpm_extended_meter_and_triplets() -> None:
+    clock = FakeMonotonicClock(initial_ns=50_000_000_000_000)
+    app = create_app(clock_fn=clock)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "create_room"})
+        joined = ws.receive_json()
+        state = ws.receive_json()
+        assert "accent_pattern" not in joined
+        assert "accent_pattern" not in state
+
+        # Lower edge: 20 BPM, 1 beat/bar, 3x triplet subdivision
+        ws.send_json(
+            {
+                "type": "update_transport",
+                "bpm": 20.0,
+                "beats_per_bar": 1,
+                "subdivision": 3,
+            }
+        )
+        low_state = ws.receive_json()
+        assert low_state["bpm"] == 20.0
+        assert low_state["beats_per_bar"] == 1
+        assert low_state["subdivision"] == 3
+        assert "accent_pattern" not in low_state
+
+        # Upper edge: 500 BPM, 16 beats/bar, 4x subdivision
+        ws.send_json(
+            {
+                "type": "update_transport",
+                "bpm": 500.0,
+                "beats_per_bar": 16,
+                "subdivision": 4,
+            }
+        )
+        high_state = ws.receive_json()
+        assert high_state["bpm"] == 500.0
+        assert high_state["beats_per_bar"] == 16
+        assert high_state["subdivision"] == 4
+
+        # Verify bar-boundary snap while playing at 500 BPM in 1/4 (1 bar = 120ms)
+        ws.send_json({"type": "update_transport", "beats_per_bar": 1, "subdivision": 3})
+        ws.receive_json()
+
+        ws.send_json({"type": "play"})
+        playing = ws.receive_json()
+        start_ns = playing["start_server_time_ns"]
+
+        # 200ms after playback start; old_bar_ns = 120_000_000ns
+        # min_target_ns = now + 500ms -> 700ms after start -> 6 bars = 720ms
+        clock.now_ns = start_ns + 200_000_000
+        ws.send_json({"type": "update_transport", "bpm": 240.0})
+        snapped = ws.receive_json()
+        assert snapped["bpm"] == 240.0
+        assert snapped["start_server_time_ns"] == start_ns + 6 * 120_000_000
 
 
 def test_update_transport_while_playing_snaps_to_next_bar_boundary() -> None:

@@ -14,46 +14,43 @@ void ClickSynth::generate(int32_t sampleRate) {
     const int32_t validRate = std::max(sampleRate, 8000);
     mSampleRate = validRate;
 
-    // 20ms sharp percussive click waveforms tuned for crisp wired-earphone transients
-    mAccentBuffer = buildDampedSineBurst(
-        validRate,
-        1500.0,
-        3000.0,
-        0.22f,
-        0.020,
-        0.0040,
-        0.95f
-    );
-    mRegularBuffer = buildDampedSineBurst(
-        validRate,
-        1000.0,
-        0.0,
-        0.0f,
-        0.018,
-        0.0036,
-        0.75f
-    );
-    mSubdivisionBuffer = buildDampedSineBurst(
-        validRate,
-        750.0,
-        0.0,
-        0.0f,
-        0.016,
-        0.0030,
-        0.42f
-    );
+    // Profile 0: Digital Click — sharp percussive transients for loud rehearsal rooms
+    auto& digital = mBuffers[static_cast<size_t>(SoundProfile::DigitalClick)];
+    digital[static_cast<size_t>(ClickType::Accent)] =
+        buildDampedSineBurst(validRate, 1500.0, 3000.0, 0.22f, 0.020, 0.0040, 0.0003, 0.95f);
+    digital[static_cast<size_t>(ClickType::Regular)] =
+        buildDampedSineBurst(validRate, 1000.0, 0.0, 0.0f, 0.018, 0.0036, 0.0003, 0.75f);
+    digital[static_cast<size_t>(ClickType::Subdivision)] =
+        buildDampedSineBurst(validRate, 750.0, 0.0, 0.0f, 0.016, 0.0030, 0.0003, 0.42f);
+
+    // Profile 1: Woodblock — resonant dual-mode woody knock (~2.57x modal ratio)
+    auto& wood = mBuffers[static_cast<size_t>(SoundProfile::Woodblock)];
+    wood[static_cast<size_t>(ClickType::Accent)] =
+        buildDampedSineBurst(validRate, 1120.0, 2860.0, 0.35f, 0.024, 0.0052, 0.0003, 0.95f);
+    wood[static_cast<size_t>(ClickType::Regular)] =
+        buildDampedSineBurst(validRate, 820.0, 2110.0, 0.30f, 0.022, 0.0048, 0.0003, 0.76f);
+    wood[static_cast<size_t>(ClickType::Subdivision)] =
+        buildDampedSineBurst(validRate, 640.0, 1640.0, 0.22f, 0.018, 0.0038, 0.0003, 0.42f);
+
+    // Profile 2: Soft Tick — warmer low-fatigue envelope for long wired-earphone sessions
+    auto& soft = mBuffers[static_cast<size_t>(SoundProfile::SoftTick)];
+    soft[static_cast<size_t>(ClickType::Accent)] =
+        buildDampedSineBurst(validRate, 920.0, 0.0, 0.0f, 0.018, 0.0032, 0.0008, 0.85f);
+    soft[static_cast<size_t>(ClickType::Regular)] =
+        buildDampedSineBurst(validRate, 660.0, 0.0, 0.0f, 0.016, 0.0028, 0.0008, 0.65f);
+    soft[static_cast<size_t>(ClickType::Subdivision)] =
+        buildDampedSineBurst(validRate, 480.0, 0.0, 0.0f, 0.014, 0.0024, 0.0008, 0.36f);
 }
 
-const std::vector<float>& ClickSynth::getBuffer(ClickType type) const noexcept {
-    switch (type) {
-        case ClickType::Accent:
-            return mAccentBuffer;
-        case ClickType::Regular:
-            return mRegularBuffer;
-        case ClickType::Subdivision:
-            return mSubdivisionBuffer;
-    }
-    return mRegularBuffer;
+const std::vector<float>& ClickSynth::getBuffer(
+    SoundProfile profile,
+    ClickType type
+) const noexcept {
+    const size_t rawProfile = static_cast<size_t>(profile);
+    const size_t profileIdx = rawProfile < kNumSoundProfiles ? rawProfile : 0u;
+    const size_t rawType = static_cast<size_t>(type);
+    const size_t typeIdx = rawType < kNumClickTypes ? rawType : 1u;
+    return mBuffers[profileIdx][typeIdx];
 }
 
 std::vector<float> ClickSynth::buildDampedSineBurst(
@@ -63,6 +60,7 @@ std::vector<float> ClickSynth::buildDampedSineBurst(
     float harmonicMix,
     double durationSec,
     double decayTauSec,
+    double attackSec,
     float peakAmplitude
 ) {
     const size_t numSamples = static_cast<size_t>(
@@ -70,7 +68,6 @@ std::vector<float> ClickSynth::buildDampedSineBurst(
     );
     std::vector<float> buffer(numSamples, 0.0f);
 
-    const double attackSec = 0.0003;  // 0.3ms anti-pop linear attack
     const size_t attackSamples = std::max<size_t>(
         1, static_cast<size_t>(std::round(attackSec * static_cast<double>(sampleRate)))
     );

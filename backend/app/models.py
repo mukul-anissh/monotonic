@@ -3,11 +3,11 @@
 from dataclasses import dataclass
 from typing import Any
 
-MIN_BPM: float = 30.0
-MAX_BPM: float = 300.0
-MIN_BEATS_PER_BAR: int = 2
-MAX_BEATS_PER_BAR: int = 12
-VALID_SUBDIVISIONS: tuple[int, ...] = (1, 2, 4)
+MIN_BPM: float = 20.0
+MAX_BPM: float = 500.0
+MIN_BEATS_PER_BAR: int = 1
+MAX_BEATS_PER_BAR: int = 16
+VALID_SUBDIVISIONS: tuple[int, ...] = (1, 2, 3, 4)
 
 PLAY_LEAD_IN_NS: int = 1_500_000_000
 TRANSITION_MIN_LEAD_NS: int = 500_000_000

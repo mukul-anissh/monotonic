@@ -3,12 +3,14 @@ package com.monotonic.metronome.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.monotonic.metronome.audio.AccentPattern
 import com.monotonic.metronome.audio.AudioFocusController
 import com.monotonic.metronome.audio.AudioRouteMonitor
 import com.monotonic.metronome.audio.NativeMetronomeEngine
 import com.monotonic.metronome.data.PreferencesRepository
 import com.monotonic.metronome.model.AppUiState
 import com.monotonic.metronome.model.AudioDiagnostics
+import com.monotonic.metronome.model.ClickSoundOption
 import com.monotonic.metronome.model.ConnectionStatus
 import com.monotonic.metronome.model.RoomSnapshot
 import com.monotonic.metronome.model.RoomStateEvent
@@ -16,6 +18,7 @@ import com.monotonic.metronome.network.RoomWebSocketClient
 import com.monotonic.metronome.sync.ClockSyncManager
 import com.monotonic.metronome.sync.ClockSyncMath
 import com.monotonic.metronome.sync.MonotonicClock
+import com.monotonic.metronome.sync.SoloScheduler
 import com.monotonic.metronome.sync.SystemNanoTimeClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,12 +41,18 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
+    private val transportLock = Any()
+    private var engineScheduleVersion: Long = 1L
+    private var lastScheduleIdentity: Triple<Boolean, Long, Boolean>? = null
+    private var wasEnginePlaying: Boolean = false
+
     @Volatile
-    private var currentVolumeScale: Float = AudioFocusController.DEFAULT_VOLUME
+    private var currentFocusGain: Float = AudioFocusController.GAIN_FULL
 
     private val tapTimestampsNs = ArrayDeque<Long>()
+    private var lastRoomNudgeNs: Long = 0L
+    private var lastRoomNudgeBpm: Double = 120.0
     private var diagnosticsJob: Job? = null
-    private var audioStartupJob: Job? = null
 
     private lateinit var webSocketClient: RoomWebSocketClient
 
@@ -53,17 +62,17 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     private val audioRouteMonitor = AudioRouteMonitor(application) {
-        if (_uiState.value.activeRoom != null) {
-            viewModelScope.launch(Dispatchers.IO) {
-                nativeEngine.restartStream()
-                refreshAudioDiagnostics()
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            nativeEngine.restartStream()
+            refreshAudioDiagnostics()
         }
     }
 
-    private val audioFocusController = AudioFocusController(application) { newVolume ->
-        currentVolumeScale = newVolume
-        pushCurrentStateToNative()
+    private val audioFocusController = AudioFocusController(application) { gain ->
+        currentFocusGain = gain
+        synchronized(transportLock) {
+            pushSnapshotToNativeLocked(_uiState.value)
+        }
     }
 
     init {
@@ -82,7 +91,8 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
                 _uiState.update {
                     it.copy(
                         isConnectingAction = false,
-                        errorMessage = err.message
+                        roomSheetError = if (it.showRoomSheet) err.message else it.roomSheetError,
+                        snackbarMessage = if (!it.showRoomSheet) err.message else it.snackbarMessage
                     )
                 }
             },
@@ -93,13 +103,33 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
 
         audioRouteMonitor.start()
 
+        // Keep native C++ Oboe stream open immediately so Solo Mode plays with zero startup lag
+        viewModelScope.launch(Dispatchers.IO) {
+            nativeEngine.startStream()
+            refreshAudioDiagnostics()
+        }
+        startDiagnosticsPolling()
+
         viewModelScope.launch {
-            val savedUrl = preferences.serverUrlFlow.first()
-            val savedOffsetMs = preferences.manualOffsetMsFlow.first()
+            val prefs = preferences.preferencesFlow.first()
+            val adaptedAccents = AccentPattern.deserialize(prefs.accentPatternRaw, prefs.soloBeatsPerBar)
+            nativeEngine.setSoundProfile(prefs.clickSound.id)
+            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(adaptedAccents))
+
             updateStateAndPushTransport { state ->
+                val updatedSolo = state.soloState.copy(
+                    bpm = prefs.soloBpm,
+                    beatsPerBar = prefs.soloBeatsPerBar,
+                    subdivision = prefs.soloSubdivision
+                )
                 state.copy(
-                    serverUrl = savedUrl,
-                    manualOffsetMs = savedOffsetMs
+                    serverUrl = prefs.serverUrl,
+                    manualOffsetMs = prefs.manualOffsetMs,
+                    masterVolume = prefs.masterVolume,
+                    clickSound = prefs.clickSound,
+                    visualBeatFlash = prefs.visualBeatFlash,
+                    soloState = updatedSolo,
+                    accentLevels = adaptedAccents
                 )
             }
         }
@@ -119,12 +149,41 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun openRoomSheet() {
+        _uiState.update { it.copy(showRoomSheet = true, roomSheetError = null) }
+    }
+
+    fun dismissRoomSheet() {
+        _uiState.update {
+            it.copy(showRoomSheet = false, isConnectingAction = false, roomSheetError = null)
+        }
+    }
+
+    fun openSettings() {
+        _uiState.update { it.copy(showSettings = true) }
+    }
+
+    fun closeSettings() {
+        _uiState.update { it.copy(showSettings = false) }
+    }
+
+    fun consumeSnackbar() {
+        _uiState.update { it.copy(snackbarMessage = null) }
+    }
+
+    fun showSnackbar(message: String) {
+        _uiState.update { it.copy(snackbarMessage = message) }
+    }
+
     fun onServerUrlChanged(url: String) {
-        _uiState.update { it.copy(serverUrl = url, errorMessage = null) }
+        _uiState.update { it.copy(serverUrl = url, roomSheetError = null) }
+        viewModelScope.launch {
+            preferences.saveServerUrl(url)
+        }
     }
 
     fun onRoomCodeInputChanged(code: String) {
-        _uiState.update { it.copy(roomCodeInput = code, errorMessage = null) }
+        _uiState.update { it.copy(roomCodeInput = code, roomSheetError = null) }
     }
 
     fun createRoom() {
@@ -133,7 +192,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             preferences.saveServerUrl(url)
         }
-        _uiState.update { it.copy(isConnectingAction = true, errorMessage = null) }
+        _uiState.update { it.copy(isConnectingAction = true, roomSheetError = null) }
         webSocketClient.connectAndExecute(url) {
             webSocketClient.createRoom()
         }
@@ -146,46 +205,145 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             preferences.saveServerUrl(url)
         }
-        _uiState.update { it.copy(isConnectingAction = true, errorMessage = null) }
+        _uiState.update { it.copy(isConnectingAction = true, roomSheetError = null) }
         webSocketClient.connectAndExecute(url) {
             webSocketClient.joinRoom(code)
         }
     }
 
     fun leaveRoom() {
+        if (!_uiState.value.isInRoom) return
         webSocketClient.leaveRoom()
-        teardownRoomSession(errorMessage = null)
+        exitRoomToSoloMode(snackbarMessage = "Left room — Solo Mode")
         webSocketClient.disconnect()
     }
 
     fun togglePlayStop() {
-        val room = _uiState.value.activeRoom ?: return
-        if (room.isPlaying) {
-            webSocketClient.stop()
+        val state = _uiState.value
+        val room = state.activeRoom
+        if (room != null) {
+            if (room.isPlaying) {
+                webSocketClient.stop()
+            } else {
+                webSocketClient.play()
+            }
         } else {
-            webSocketClient.play()
+            val nowNs = clock.nanoTime()
+            updateStateAndPushTransport { prev ->
+                val nextSolo = if (prev.soloState.isPlaying) {
+                    SoloScheduler.stop(prev.soloState)
+                } else {
+                    SoloScheduler.play(prev.soloState, nowNs)
+                }
+                prev.copy(soloState = nextSolo)
+            }
         }
     }
 
     fun updateBpm(bpm: Double) {
-        val clamped = bpm.coerceIn(30.0, 300.0)
-        webSocketClient.updateTransport(bpm = clamped)
+        val clamped = (bpm.coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM) * 100.0)
+            .roundToInt() / 100.0
+        val state = _uiState.value
+        if (state.isInRoom) {
+            lastRoomNudgeNs = clock.nanoTime()
+            lastRoomNudgeBpm = clamped
+            webSocketClient.updateTransport(bpm = clamped)
+        } else {
+            val nowNs = clock.nanoTime()
+            var savedBpm = clamped
+            var savedBpb = state.beatsPerBar
+            var savedSub = state.subdivision
+            updateStateAndPushTransport { prev ->
+                val nextSolo = SoloScheduler.updateTransport(
+                    state = prev.soloState,
+                    nowNs = nowNs,
+                    bpm = clamped
+                )
+                savedBpm = nextSolo.bpm
+                savedBpb = nextSolo.beatsPerBar
+                savedSub = nextSolo.subdivision
+                prev.copy(soloState = nextSolo)
+            }
+            viewModelScope.launch {
+                preferences.saveSoloTransport(savedBpm, savedBpb, savedSub)
+            }
+        }
+    }
+
+    fun nudgeBpm(delta: Double) {
+        val state = _uiState.value
+        val nowNs = clock.nanoTime()
+        val baseBpm = if (state.isInRoom && (nowNs - lastRoomNudgeNs) < 600_000_000L) {
+            lastRoomNudgeBpm
+        } else {
+            state.bpm
+        }
+        val target = (baseBpm + delta).roundToInt().toDouble()
+            .coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM)
+        updateBpm(target)
     }
 
     fun updateBeatsPerBar(beatsPerBar: Int) {
-        val clamped = beatsPerBar.coerceIn(2, 12)
-        webSocketClient.updateTransport(beatsPerBar = clamped)
+        val clamped = beatsPerBar.coerceIn(
+            SoloScheduler.MIN_BEATS_PER_BAR,
+            SoloScheduler.MAX_BEATS_PER_BAR
+        )
+        val state = _uiState.value
+        if (state.isInRoom) {
+            webSocketClient.updateTransport(beatsPerBar = clamped)
+        } else {
+            val nowNs = clock.nanoTime()
+            var adaptedAccents: List<Int> = emptyList()
+            var savedBpm = state.bpm
+            var savedSub = state.subdivision
+            updateStateAndPushTransport { prev ->
+                val nextSolo = SoloScheduler.updateTransport(
+                    state = prev.soloState,
+                    nowNs = nowNs,
+                    beatsPerBar = clamped
+                )
+                adaptedAccents = AccentPattern.adaptPattern(prev.accentLevels, nextSolo.beatsPerBar)
+                savedBpm = nextSolo.bpm
+                savedSub = nextSolo.subdivision
+                prev.copy(soloState = nextSolo, accentLevels = adaptedAccents)
+            }
+            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(adaptedAccents))
+            viewModelScope.launch {
+                preferences.saveAccentPattern(adaptedAccents)
+                preferences.saveSoloTransport(savedBpm, clamped, savedSub)
+            }
+        }
     }
 
     fun updateSubdivision(subdivision: Int) {
-        if (subdivision !in listOf(1, 2, 4)) return
-        webSocketClient.updateTransport(subdivision = subdivision)
+        if (subdivision !in SoloScheduler.VALID_SUBDIVISIONS) return
+        val state = _uiState.value
+        if (state.isInRoom) {
+            webSocketClient.updateTransport(subdivision = subdivision)
+        } else {
+            val nowNs = clock.nanoTime()
+            var savedBpm = state.bpm
+            var savedBpb = state.beatsPerBar
+            updateStateAndPushTransport { prev ->
+                val nextSolo = SoloScheduler.updateTransport(
+                    state = prev.soloState,
+                    nowNs = nowNs,
+                    subdivision = subdivision
+                )
+                savedBpm = nextSolo.bpm
+                savedBpb = nextSolo.beatsPerBar
+                prev.copy(soloState = nextSolo)
+            }
+            viewModelScope.launch {
+                preferences.saveSoloTransport(savedBpm, savedBpb, subdivision)
+            }
+        }
     }
 
     fun onTapTempo() {
         val nowNs = clock.nanoTime()
         val last = tapTimestampsNs.lastOrNull()
-        if (last != null && (nowNs - last) > 2_500_000_000L) {
+        if (last != null && (nowNs - last) > 3_200_000_000L) {
             tapTimestampsNs.clear()
         }
         tapTimestampsNs.addLast(nowNs)
@@ -199,7 +357,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         val list = tapTimestampsNs.toList()
         for (i in 1 until list.size) {
             val delta = list[i] - list[i - 1]
-            if (delta > 150_000_000L) {
+            if (delta >= 100_000_000L) {
                 sumIntervalsNs += delta
                 count++
             }
@@ -207,8 +365,53 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         if (count == 0) return
 
         val avgIntervalNs = sumIntervalsNs.toDouble() / count.toDouble()
-        val bpm = (60_000_000_000.0 / avgIntervalNs).roundToInt().toDouble().coerceIn(30.0, 300.0)
+        val bpm = (60_000_000_000.0 / avgIntervalNs).roundToInt().toDouble()
+            .coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM)
         updateBpm(bpm)
+    }
+
+    fun cycleBeatAccent(beatIndex: Int) {
+        var nextAccents: List<Int> = emptyList()
+        _uiState.update { prev ->
+            if (beatIndex < 0 || beatIndex >= prev.beatsPerBar) {
+                nextAccents = prev.accentLevels
+                return@update prev
+            }
+            val currentList = AccentPattern.adaptPattern(prev.accentLevels, prev.beatsPerBar)
+            val mutable = currentList.toMutableList()
+            mutable[beatIndex] = AccentPattern.cycleLevel(mutable[beatIndex])
+            nextAccents = mutable
+            prev.copy(accentLevels = nextAccents)
+        }
+        if (nextAccents.isNotEmpty()) {
+            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(nextAccents))
+            viewModelScope.launch {
+                preferences.saveAccentPattern(nextAccents)
+            }
+        }
+    }
+
+    fun onMasterVolumeChanged(volume: Float) {
+        val clamped = volume.coerceIn(0f, 1f)
+        updateStateAndPushTransport { it.copy(masterVolume = clamped) }
+        viewModelScope.launch {
+            preferences.saveMasterVolume(clamped)
+        }
+    }
+
+    fun onClickSoundSelected(option: ClickSoundOption) {
+        nativeEngine.setSoundProfile(option.id)
+        _uiState.update { it.copy(clickSound = option) }
+        viewModelScope.launch {
+            preferences.saveClickSound(option)
+        }
+    }
+
+    fun onVisualBeatFlashChanged(enabled: Boolean) {
+        _uiState.update { it.copy(visualBeatFlash = enabled) }
+        viewModelScope.launch {
+            preferences.saveVisualBeatFlash(enabled)
+        }
     }
 
     fun onManualOffsetChanged(offsetMs: Int) {
@@ -223,7 +426,9 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun resyncNow() {
-        clockSyncManager.resyncNow(viewModelScope)
+        if (_uiState.value.isInRoom) {
+            clockSyncManager.resyncNow(viewModelScope)
+        }
     }
 
     fun readCurrentBeatIndex(): Int = nativeEngine.getCurrentBeatIndex()
@@ -232,52 +437,76 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun handleRoomJoined(event: RoomStateEvent) {
         val snapshot = event.toSnapshot()
+        var adaptedAccents: List<Int> = emptyList()
+
         updateStateAndPushTransport { state ->
+            val stoppedSolo = SoloScheduler.stop(state.soloState)
+            adaptedAccents = AccentPattern.adaptPattern(state.accentLevels, snapshot.beatsPerBar)
             state.copy(
+                soloState = stoppedSolo,
                 activeRoom = snapshot,
+                accentLevels = adaptedAccents,
+                showRoomSheet = false,
                 isConnectingAction = false,
-                errorMessage = null
+                roomSheetError = null,
+                snackbarMessage = "Connected to room ${snapshot.roomCode}"
             )
         }
+        nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(adaptedAccents))
 
-        viewModelScope.launch(Dispatchers.Main) {
-            audioFocusController.requestFocus()
-            audioStartupJob?.cancel()
-            audioStartupJob = viewModelScope.launch(Dispatchers.IO) {
-                nativeEngine.startStream()
-                if (_uiState.value.activeRoom == null) {
-                    nativeEngine.stopStream()
-                } else {
-                    refreshAudioDiagnostics()
-                }
-            }
+        viewModelScope.launch {
+            preferences.saveAccentPattern(adaptedAccents)
             clockSyncManager.startSession(viewModelScope)
-            startDiagnosticsPolling()
         }
     }
 
     private fun handleRoomState(event: RoomStateEvent) {
         val snapshot = event.toSnapshot()
+        var adaptedAccents: List<Int>? = null
+
         updateStateAndPushTransport { state ->
-            if (state.activeRoom == null) {
-                state
+            val currentRoom = state.activeRoom ?: return@updateStateAndPushTransport state
+            if (currentRoom.roomCode != snapshot.roomCode) {
+                return@updateStateAndPushTransport state
+            }
+            val nextAccents = if (state.accentLevels.size != snapshot.beatsPerBar) {
+                AccentPattern.adaptPattern(state.accentLevels, snapshot.beatsPerBar).also {
+                    adaptedAccents = it
+                }
             } else {
-                state.copy(activeRoom = snapshot, errorMessage = null)
+                state.accentLevels
+            }
+            state.copy(
+                activeRoom = snapshot,
+                accentLevels = nextAccents,
+                roomSheetError = null
+            )
+        }
+
+        adaptedAccents?.let { updated ->
+            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(updated))
+            viewModelScope.launch {
+                preferences.saveAccentPattern(updated)
             }
         }
     }
 
     private fun handleConnectionChanged(status: ConnectionStatus, errorMsg: String?) {
         if (status == ConnectionStatus.DISCONNECTED) {
-            val hadRoom = _uiState.value.activeRoom != null
-            if (hadRoom) {
-                teardownRoomSession(errorMessage = errorMsg ?: "Disconnected from sync server")
+            val wasInRoom = _uiState.value.isInRoom
+            if (wasInRoom) {
+                val msg = if (!errorMsg.isNullOrBlank()) {
+                    "Connection lost ($errorMsg) — returned to Solo Mode"
+                } else {
+                    "Server disconnected — returned to Solo Mode"
+                }
+                exitRoomToSoloMode(snackbarMessage = msg)
             } else {
                 _uiState.update {
                     it.copy(
                         connectionStatus = status,
                         isConnectingAction = false,
-                        errorMessage = errorMsg ?: it.errorMessage
+                        roomSheetError = errorMsg ?: it.roomSheetError
                     )
                 }
             }
@@ -286,21 +515,26 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun teardownRoomSession(errorMessage: String?) {
-        diagnosticsJob?.cancel()
-        diagnosticsJob = null
-        audioStartupJob?.cancel()
-        audioStartupJob = null
+    private fun exitRoomToSoloMode(snackbarMessage: String) {
         clockSyncManager.stop(resetOffset = true)
-        nativeEngine.stopStream()
-        audioFocusController.abandonFocus()
         tapTimestampsNs.clear()
 
         updateStateAndPushTransport { state ->
+            val prevRoom = state.activeRoom
+            val nextSolo = state.soloState.copy(
+                isPlaying = false,
+                bpm = prevRoom?.bpm ?: state.soloState.bpm,
+                beatsPerBar = prevRoom?.beatsPerBar ?: state.soloState.beatsPerBar,
+                subdivision = prevRoom?.subdivision ?: state.soloState.subdivision,
+                localStartTimeNs = 0L,
+                stateVersion = state.soloState.stateVersion + 1L
+            )
             state.copy(
+                soloState = nextSolo,
                 activeRoom = null,
                 isConnectingAction = false,
-                errorMessage = errorMessage,
+                roomSheetError = null,
+                snackbarMessage = snackbarMessage,
                 localScheduledStartNs = 0L
             )
         }
@@ -309,7 +543,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     private fun startDiagnosticsPolling() {
         diagnosticsJob?.cancel()
         diagnosticsJob = viewModelScope.launch {
-            while (isActive && _uiState.value.activeRoom != null) {
+            while (isActive) {
                 refreshAudioDiagnostics()
                 delay(500L)
             }
@@ -327,44 +561,66 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun updateStateAndPushTransport(transform: (AppUiState) -> AppUiState) {
-        lateinit var updated: AppUiState
-        _uiState.update { prev ->
-            val candidate = transform(prev)
-            val room = candidate.activeRoom
-            val sync = candidate.clockSync
-            val localStartNs = if (room != null && room.isPlaying && sync.isSynced) {
-                ClockSyncMath.serverToLocalTimeNs(room.startServerTimeNs, sync.offsetNs)
+        synchronized(transportLock) {
+            lateinit var updated: AppUiState
+            _uiState.update { prev ->
+                val candidate = transform(prev)
+                val localStartNs = computeLocalStartTimeNs(candidate)
+                updated = candidate.copy(localScheduledStartNs = localStartNs)
+                updated
+            }
+            pushSnapshotToNativeLocked(updated)
+        }
+    }
+
+    private fun computeLocalStartTimeNs(state: AppUiState): Long {
+        val room = state.activeRoom
+        return if (room != null) {
+            if (room.isPlaying && state.clockSync.isSynced) {
+                ClockSyncMath.serverToLocalTimeNs(room.startServerTimeNs, state.clockSync.offsetNs)
             } else {
                 0L
             }
-            updated = candidate.copy(localScheduledStartNs = localStartNs)
-            updated
-        }
-        pushSnapshotToNative(updated)
-    }
-
-    private fun pushCurrentStateToNative() {
-        pushSnapshotToNative(_uiState.value)
-    }
-
-    private fun pushSnapshotToNative(state: AppUiState) {
-        val room = state.activeRoom
-        val sync = state.clockSync
-        val shouldPlay = room != null && room.isPlaying && sync.isSynced
-        val localStartNs = if (shouldPlay) {
-            ClockSyncMath.serverToLocalTimeNs(room!!.startServerTimeNs, sync.offsetNs)
         } else {
-            0L
+            if (state.soloState.isPlaying) state.soloState.localStartTimeNs else 0L
         }
+    }
+
+    private fun pushSnapshotToNativeLocked(state: AppUiState) {
+        val room = state.activeRoom
+        val isInRoom = room != null
+        val shouldPlay = if (isInRoom) {
+            room!!.isPlaying && state.clockSync.isSynced
+        } else {
+            state.soloState.isPlaying
+        }
+
+        if (shouldPlay && !wasEnginePlaying) {
+            audioFocusController.requestFocus()
+        } else if (!shouldPlay && wasEnginePlaying) {
+            audioFocusController.abandonFocus()
+        }
+        wasEnginePlaying = shouldPlay
+
+        val sourceVersion = if (isInRoom) room!!.stateVersion else state.soloState.stateVersion
+        val identity = Triple(isInRoom, sourceVersion, shouldPlay)
+        if (lastScheduleIdentity != identity) {
+            lastScheduleIdentity = identity
+            engineScheduleVersion += 1L
+        }
+
+        val localStartNs = computeLocalStartTimeNs(state)
+        val effectiveVolume = (state.masterVolume * currentFocusGain).coerceIn(0f, 1f)
+
         nativeEngine.updateTransport(
             isPlaying = shouldPlay,
             localStartTimeNs = localStartNs,
-            bpm = room?.bpm ?: 120.0,
-            beatsPerBar = room?.beatsPerBar ?: 4,
-            subdivision = room?.subdivision ?: 1,
+            bpm = state.bpm,
+            beatsPerBar = state.beatsPerBar,
+            subdivision = state.subdivision,
             manualOffsetNs = state.manualOffsetMs.toLong() * 1_000_000L,
-            volume = currentVolumeScale,
-            stateVersion = room?.stateVersion ?: 0L
+            volume = effectiveVolume,
+            stateVersion = engineScheduleVersion
         )
     }
 

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Left pulse arcs -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M34,45 Q30,54 34,63" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:pathData="M28,40 Q23,54 28,68" />
+
+    <!-- Right pulse arcs -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M74,45 Q78,54 74,63" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:pathData="M80,40 Q85,54 80,68" />
+
+    <!-- Metronome silhouette outline -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round"
+        android:pathData="M45,29 L63,29 L70,76 C70.3,78 68.8,79 67,79 L41,79 C39.2,79 37.7,78 38,76 Z" />
+
+    <!-- Pendulum arm -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M54,71 L67,31" />
+
+    <!-- Pendulum weight -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M62.5,40.5 L67.2,45.5 L62.0,50.5 L57.3,45.5 Z" />
+
+    <!-- Pivot dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,71m-3.2,0a3.2,3.2 0,1 1,6.4 0a3.2,3.2 0,1 1,-6.4 0" />
+</vector>

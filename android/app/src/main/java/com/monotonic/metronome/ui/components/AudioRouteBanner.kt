@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.BluetoothAudio
-import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -23,78 +22,65 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.monotonic.metronome.model.AudioRouteState
 import com.monotonic.metronome.model.AudioRouteStatus
-import com.monotonic.metronome.ui.theme.AccentEmerald
 import com.monotonic.metronome.ui.theme.ErrorRose
 import com.monotonic.metronome.ui.theme.TextSecondary
 import com.monotonic.metronome.ui.theme.WarningAmber
 
+/**
+ * Compact warning banner displayed only while synced to a room when wired
+ * earphones (3.5mm or USB-C) are not connected.
+ */
 @Composable
 fun AudioRouteBanner(
     routeState: AudioRouteState,
     modifier: Modifier = Modifier
 ) {
-    val isWarning = routeState.status != AudioRouteStatus.WIRED_READY
-    val borderColor = when (routeState.status) {
-        AudioRouteStatus.WIRED_READY -> AccentEmerald.copy(alpha = 0.4f)
-        AudioRouteStatus.BLUETOOTH_WARNING -> ErrorRose.copy(alpha = 0.7f)
-        AudioRouteStatus.SPEAKER_WARNING -> WarningAmber.copy(alpha = 0.6f)
-    }
-    val containerColor = when (routeState.status) {
-        AudioRouteStatus.WIRED_READY -> AccentEmerald.copy(alpha = 0.08f)
-        AudioRouteStatus.BLUETOOTH_WARNING -> ErrorRose.copy(alpha = 0.14f)
-        AudioRouteStatus.SPEAKER_WARNING -> WarningAmber.copy(alpha = 0.12f)
-    }
-    val iconColor = when (routeState.status) {
-        AudioRouteStatus.WIRED_READY -> AccentEmerald
-        AudioRouteStatus.BLUETOOTH_WARNING -> ErrorRose
-        AudioRouteStatus.SPEAKER_WARNING -> WarningAmber
-    }
-    val icon = when (routeState.status) {
-        AudioRouteStatus.WIRED_READY -> Icons.Rounded.Headphones
-        AudioRouteStatus.BLUETOOTH_WARNING -> Icons.Rounded.BluetoothAudio
-        AudioRouteStatus.SPEAKER_WARNING -> Icons.AutoMirrored.Rounded.VolumeUp
-    }
+    if (routeState.status == AudioRouteStatus.WIRED_READY) return
 
-    val title = when (routeState.status) {
-        AudioRouteStatus.WIRED_READY -> "Wired Audio Active (${routeState.deviceLabel})"
-        AudioRouteStatus.BLUETOOTH_WARNING -> "Bluetooth Audio Detected (${routeState.deviceLabel})"
-        AudioRouteStatus.SPEAKER_WARNING -> "Phone Speaker Active"
+    val isBluetooth = routeState.status == AudioRouteStatus.BLUETOOTH_WARNING
+    val accentColor = if (isBluetooth) ErrorRose else WarningAmber
+    val icon = if (isBluetooth) {
+        Icons.Rounded.BluetoothAudio
+    } else {
+        Icons.AutoMirrored.Rounded.VolumeUp
     }
-
-    val subtitle = when (routeState.status) {
-        AudioRouteStatus.WIRED_READY -> "Low-latency wired path ready for <10ms ensemble sync."
-        AudioRouteStatus.BLUETOOTH_WARNING ->
-            "Bluetooth codecs add 100–250ms of unpredictable buffer delay. Plug in 3.5mm or USB-C earphones."
-        AudioRouteStatus.SPEAKER_WARNING ->
-            "Plug in 3.5mm or USB-C wired earphones to avoid acoustic bleed and speaker latency."
+    val title = if (isBluetooth) {
+        "Bluetooth Active (${routeState.deviceLabel})"
+    } else {
+        "Phone Speaker Active"
+    }
+    val message = if (isBluetooth) {
+        "Plug in wired 3.5mm/USB-C earphones to avoid 100–250ms wireless audio delay."
+    } else {
+        "Plug in wired 3.5mm/USB-C earphones for sub-10ms ensemble sync."
     }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor)
+        shape = RoundedCornerShape(12.dp),
+        color = accentColor.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = title,
-                tint = iconColor,
-                modifier = Modifier.size(22.dp)
+                tint = accentColor,
+                modifier = Modifier.size(18.dp)
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isWarning) iconColor else AccentEmerald
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor
                 )
                 Text(
-                    text = subtitle,
+                    text = message,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
