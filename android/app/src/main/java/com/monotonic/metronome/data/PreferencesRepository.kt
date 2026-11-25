@@ -21,7 +21,7 @@ data class UserPreferencesSnapshot(
     val serverUrl: String = PreferencesRepository.DEFAULT_SERVER_URL,
     val manualOffsetMs: Int = 0,
     val masterVolume: Float = PreferencesRepository.DEFAULT_MASTER_VOLUME,
-    val clickSound: ClickSoundOption = ClickSoundOption.DIGITAL_CLICK,
+    val clickSound: ClickSoundOption = ClickSoundOption.CLASSIC,
     val visualBeatFlash: Boolean = true,
     val accentPatternRaw: String? = null,
     val soloBpm: Double = 120.0,
@@ -55,7 +55,7 @@ class PreferencesRepository(private val context: Context) {
             manualOffsetMs = (prefs[KEY_MANUAL_OFFSET_MS] ?: 0)
                 .coerceIn(MIN_MANUAL_OFFSET_MS, MAX_MANUAL_OFFSET_MS),
             masterVolume = (prefs[KEY_MASTER_VOLUME] ?: DEFAULT_MASTER_VOLUME).coerceIn(0f, 1f),
-            clickSound = ClickSoundOption.fromId(prefs[KEY_CLICK_SOUND] ?: 0),
+            clickSound = ClickSoundOption.fromId(prefs[KEY_CLICK_SOUND] ?: ClickSoundOption.CLASSIC.id),
             visualBeatFlash = prefs[KEY_VISUAL_BEAT_FLASH] ?: true,
             accentPatternRaw = prefs[KEY_ACCENT_PATTERN],
             soloBpm = (prefs[KEY_SOLO_BPM] ?: 120f).toDouble()
@@ -99,6 +99,13 @@ class PreferencesRepository(private val context: Context) {
     suspend fun saveAccentPattern(levels: List<Int>) {
         context.dataStore.edit { prefs ->
             prefs[KEY_ACCENT_PATTERN] = AccentPattern.serialize(levels)
+        }
+    }
+
+    suspend fun saveSubdivision(subdivision: Int) {
+        if (subdivision !in SoloScheduler.VALID_SUBDIVISIONS) return
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SOLO_SUBDIVISION] = subdivision
         }
     }
 

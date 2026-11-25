@@ -41,9 +41,16 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
+    private data class ScheduleIdentity(
+        val isInRoom: Boolean,
+        val sourceVersion: Long,
+        val shouldPlay: Boolean,
+        val localSubdivision: Int
+    )
+
     private val transportLock = Any()
     private var engineScheduleVersion: Long = 1L
-    private var lastScheduleIdentity: Triple<Boolean, Long, Boolean>? = null
+    private var lastScheduleIdentity: ScheduleIdentity? = null
     private var wasEnginePlaying: Boolean = false
 
     @Volatile
@@ -128,6 +135,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
                     masterVolume = prefs.masterVolume,
                     clickSound = prefs.clickSound,
                     visualBeatFlash = prefs.visualBeatFlash,
+                    localSubdivision = prefs.soloSubdivision,
                     soloState = updatedSolo,
                     accentLevels = adaptedAccents
                 )
@@ -317,26 +325,27 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateSubdivision(subdivision: Int) {
         if (subdivision !in SoloScheduler.VALID_SUBDIVISIONS) return
-        val state = _uiState.value
-        if (state.isInRoom) {
-            webSocketClient.updateTransport(subdivision = subdivision)
-        } else {
-            val nowNs = clock.nanoTime()
-            var savedBpm = state.bpm
-            var savedBpb = state.beatsPerBar
-            updateStateAndPushTransport { prev ->
+        val nowNs = clock.nanoTime()
+        updateStateAndPushTransport { prev ->
+            if (prev.isInRoom) {
+                prev.copy(
+                    localSubdivision = subdivision,
+                    soloState = prev.soloState.copy(subdivision = subdivision)
+                )
+            } else {
                 val nextSolo = SoloScheduler.updateTransport(
                     state = prev.soloState,
                     nowNs = nowNs,
                     subdivision = subdivision
                 )
-                savedBpm = nextSolo.bpm
-                savedBpb = nextSolo.beatsPerBar
-                prev.copy(soloState = nextSolo)
+                prev.copy(
+                    localSubdivision = subdivision,
+                    soloState = nextSolo
+                )
             }
-            viewModelScope.launch {
-                preferences.saveSoloTransport(savedBpm, savedBpb, subdivision)
-            }
+        }
+        viewModelScope.launch {
+            preferences.saveSubdivision(subdivision)
         }
     }
 
@@ -525,7 +534,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
                 isPlaying = false,
                 bpm = prevRoom?.bpm ?: state.soloState.bpm,
                 beatsPerBar = prevRoom?.beatsPerBar ?: state.soloState.beatsPerBar,
-                subdivision = prevRoom?.subdivision ?: state.soloState.subdivision,
+                subdivision = state.localSubdivision,
                 localStartTimeNs = 0L,
                 stateVersion = state.soloState.stateVersion + 1L
             )
@@ -603,7 +612,12 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         wasEnginePlaying = shouldPlay
 
         val sourceVersion = if (isInRoom) room!!.stateVersion else state.soloState.stateVersion
-        val identity = Triple(isInRoom, sourceVersion, shouldPlay)
+        val identity = ScheduleIdentity(
+            isInRoom = isInRoom,
+            sourceVersion = sourceVersion,
+            shouldPlay = shouldPlay,
+            localSubdivision = state.localSubdivision
+        )
         if (lastScheduleIdentity != identity) {
             lastScheduleIdentity = identity
             engineScheduleVersion += 1L
@@ -631,7 +645,6 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
             isPlaying = isPlaying,
             bpm = bpm,
             beatsPerBar = beatsPerBar,
-            subdivision = subdivision,
             startServerTimeNs = startServerTimeNs,
             stateVersion = stateVersion
         )

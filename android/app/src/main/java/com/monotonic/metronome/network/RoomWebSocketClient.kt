@@ -172,15 +172,13 @@ class RoomWebSocketClient(
 
     fun updateTransport(
         bpm: Double? = null,
-        beatsPerBar: Int? = null,
-        subdivision: Int? = null
+        beatsPerBar: Int? = null
     ): Boolean {
         return sendRaw(
             json.encodeToString(
                 UpdateTransportMessage(
                     bpm = bpm,
-                    beatsPerBar = beatsPerBar,
-                    subdivision = subdivision
+                    beatsPerBar = beatsPerBar
                 )
             )
         )

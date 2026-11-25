@@ -1,20 +1,22 @@
 package com.monotonic.metronome.ui.components
 
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,26 +31,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.monotonic.metronome.audio.AccentPattern
-import com.monotonic.metronome.ui.theme.AccentAmber
-import com.monotonic.metronome.ui.theme.AccentEmerald
-import com.monotonic.metronome.ui.theme.DarkBorder
-import com.monotonic.metronome.ui.theme.DarkSurfaceVariant
-import com.monotonic.metronome.ui.theme.TextPrimary
+import com.monotonic.metronome.ui.theme.BeatMuteSurface
+import com.monotonic.metronome.ui.theme.BeatNormalSurface
+import com.monotonic.metronome.ui.theme.StudioAmber
+import com.monotonic.metronome.ui.theme.TextMuted
 import com.monotonic.metronome.ui.theme.TextSecondary
 
 /**
- * Interactive local per-beat accent visualizer synced directly to the C++ Oboe
- * engine's lock-free atomic beat index and sequence counter via Compose VSYNC frames.
+ * Borderless animated per-beat accent strip rendered directly on the dark canvas,
+ * synced to the C++ Oboe engine's lock-free atomic beat index and sequence counter.
  *
- * Tapping any beat block cycles local audio state: Accent (2) -> Normal (1) -> Mute (0).
+ * Tapping any beat cycles local state: Accent (2) -> Normal (1) -> Mute (0).
  */
 @Composable
 fun BeatVisualizer(
@@ -61,7 +62,7 @@ fun BeatVisualizer(
     onCycleBeatAccent: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     var activeBeat by remember { mutableIntStateOf(-1) }
     var pulseStrength by remember { mutableFloatStateOf(0f) }
 
@@ -98,151 +99,159 @@ fun BeatVisualizer(
         AccentPattern.adaptPattern(accentLevels, beatsPerBar)
     }
 
-    val flashColor = remember(activeBeat, adaptedLevels) {
-        val level = adaptedLevels.getOrElse(activeBeat) { AccentPattern.ACCENT_NORMAL }
-        when (level) {
-            AccentPattern.ACCENT_HIGH -> AccentAmber
-            AccentPattern.ACCENT_NORMAL -> AccentEmerald
-            else -> TextSecondary
-        }
-    }
-
-    val containerBorderColor = if (visualBeatFlash && isPlaying && activeBeat >= 0 && pulseStrength > 0.05f) {
-        flashColor.copy(alpha = 0.25f + 0.55f * pulseStrength)
-    } else {
-        DarkBorder
+    val maxRowSize = if (beatsPerBar > 8) (beatsPerBar + 1) / 2 else beatsPerBar
+    val rows = remember(beatsPerBar, maxRowSize) {
+        (0 until beatsPerBar).chunked(maxRowSize)
     }
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF13161E))
-            .border(1.5.dp, containerBorderColor, RoundedCornerShape(20.dp))
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        val maxRowSize = if (beatsPerBar > 8) (beatsPerBar + 1) / 2 else beatsPerBar
-        val rows = remember(beatsPerBar, maxRowSize) {
-            (0 until beatsPerBar).chunked(maxRowSize)
-        }
-        val rowHeight = if (rows.size > 1) 78.dp else 112.dp
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            rows.forEach { rowIndices ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(if (beatsPerBar > 8) 6.dp else 10.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    rowIndices.forEach { beatIdx ->
+                        val level = adaptedLevels.getOrElse(beatIdx) { AccentPattern.ACCENT_NORMAL }
+                        val isCurrent = isPlaying && activeBeat == beatIdx
+                        val activePulse = if (isCurrent) {
+                            if (visualBeatFlash) pulseStrength else 0.7f
+                        } else {
+                            0f
+                        }
 
-        rows.forEach { rowIndices ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(rowHeight),
-                horizontalArrangement = Arrangement.spacedBy(if (beatsPerBar > 8) 6.dp else 8.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                rowIndices.forEach { beatIdx ->
-                    val level = adaptedLevels.getOrElse(beatIdx) { AccentPattern.ACCENT_NORMAL }
-                    val isCurrent = isPlaying && activeBeat == beatIdx
-                    val targetHeight: Dp = when (level) {
-                        AccentPattern.ACCENT_HIGH -> rowHeight
-                        AccentPattern.ACCENT_NORMAL -> rowHeight * 0.68f
-                        else -> rowHeight * 0.34f
-                    }
-                    val animatedHeight by animateDpAsState(
-                        targetValue = targetHeight,
-                        animationSpec = tween(durationMillis = 120),
-                        label = "beatBlockHeight"
-                    )
-
-                    val baseColor = when (level) {
-                        AccentPattern.ACCENT_HIGH -> AccentAmber
-                        AccentPattern.ACCENT_NORMAL -> AccentEmerald
-                        else -> TextSecondary
-                    }
-
-                    val activeGlowAlpha = if (level == AccentPattern.ACCENT_MUTE) {
-                        0.18f + 0.22f * pulseStrength
-                    } else {
-                        0.42f + 0.58f * pulseStrength
-                    }
-
-                    val fillColor = when {
-                        isCurrent -> baseColor.copy(alpha = activeGlowAlpha)
-                        level == AccentPattern.ACCENT_HIGH -> AccentAmber.copy(alpha = 0.22f)
-                        level == AccentPattern.ACCENT_NORMAL -> AccentEmerald.copy(alpha = 0.14f)
-                        else -> DarkSurfaceVariant.copy(alpha = 0.55f)
-                    }
-
-                    val borderColor = when {
-                        isCurrent -> baseColor
-                        level == AccentPattern.ACCENT_HIGH -> AccentAmber.copy(alpha = 0.65f)
-                        level == AccentPattern.ACCENT_NORMAL -> AccentEmerald.copy(alpha = 0.45f)
-                        else -> DarkBorder
-                    }
-
-                    val scale = if (isCurrent && level != AccentPattern.ACCENT_MUTE) {
-                        1f + 0.06f * pulseStrength
-                    } else {
-                        1f
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(animatedHeight)
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .shadow(
-                                elevation = if (isCurrent && level != AccentPattern.ACCENT_MUTE && pulseStrength > 0.1f) 12.dp else 0.dp,
-                                shape = RoundedCornerShape(12.dp),
-                                ambientColor = baseColor,
-                                spotColor = baseColor
-                            )
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(fillColor)
-                            .border(
-                                width = if (isCurrent) 2.dp else 1.dp,
-                                color = borderColor,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onCycleBeatAccent(beatIdx)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "${beatIdx + 1}",
-                            fontSize = if (beatsPerBar > 10) 11.sp else 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = when {
-                                isCurrent && level != AccentPattern.ACCENT_MUTE -> Color(0xFF0A0C10)
-                                isCurrent -> TextPrimary
-                                level == AccentPattern.ACCENT_MUTE -> TextSecondary.copy(alpha = 0.45f)
-                                else -> TextPrimary.copy(alpha = 0.9f)
-                            }
+                        val targetHeight: Dp = when (level) {
+                            AccentPattern.ACCENT_HIGH -> 56.dp
+                            AccentPattern.ACCENT_NORMAL -> 36.dp
+                            else -> 14.dp
+                        }
+                        val animatedHeight by animateDpAsState(
+                            targetValue = targetHeight,
+                            animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
+                            label = "beatBarHeight"
                         )
+
+                        val targetFillColor = when {
+                            isCurrent && level == AccentPattern.ACCENT_HIGH ->
+                                StudioAmber.copy(alpha = 0.55f + 0.45f * activePulse)
+                            isCurrent && level == AccentPattern.ACCENT_NORMAL ->
+                                StudioAmber.copy(alpha = 0.42f + 0.50f * activePulse)
+                            isCurrent ->
+                                Color(0xFF282C38)
+                            level == AccentPattern.ACCENT_HIGH ->
+                                StudioAmber.copy(alpha = 0.25f)
+                            level == AccentPattern.ACCENT_NORMAL ->
+                                BeatNormalSurface
+                            else ->
+                                BeatMuteSurface
+                        }
+                        val animatedFillColor by animateColorAsState(
+                            targetValue = targetFillColor,
+                            animationSpec = tween(durationMillis = if (isCurrent) 55 else 150),
+                            label = "beatBarColor"
+                        )
+
+                        val scaleX = if (isCurrent && visualBeatFlash && level != AccentPattern.ACCENT_MUTE) {
+                            1f + 0.03f * pulseStrength
+                        } else {
+                            1f
+                        }
+                        val scaleY = if (isCurrent && visualBeatFlash && level != AccentPattern.ACCENT_MUTE) {
+                            1f + 0.06f * pulseStrength
+                        } else {
+                            1f
+                        }
+
+                        val cornerRadius = if (beatsPerBar > 10) 7.dp else 10.dp
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    onCycleBeatAccent(beatIdx)
+                                }
+                                .padding(top = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(animatedHeight)
+                                        .graphicsLayer {
+                                            this.scaleX = scaleX
+                                            this.scaleY = scaleY
+                                            transformOrigin = TransformOrigin(0.5f, 1f)
+                                        }
+                                        .shadow(
+                                            elevation = if (isCurrent && visualBeatFlash &&
+                                                level != AccentPattern.ACCENT_MUTE && pulseStrength > 0.1f
+                                            ) {
+                                                12.dp
+                                            } else {
+                                                0.dp
+                                            },
+                                            shape = RoundedCornerShape(cornerRadius),
+                                            ambientColor = StudioAmber,
+                                            spotColor = StudioAmber
+                                        )
+                                        .clip(RoundedCornerShape(cornerRadius))
+                                        .background(animatedFillColor)
+                                ) {
+                                    if (level == AccentPattern.ACCENT_HIGH) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(4.dp)
+                                                .align(Alignment.TopCenter)
+                                                .background(StudioAmber)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = "${beatIdx + 1}",
+                                fontSize = if (beatsPerBar > 12) 10.sp else 11.sp,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
+                                color = when {
+                                    isCurrent && level != AccentPattern.ACCENT_MUTE -> StudioAmber
+                                    isCurrent -> TextSecondary
+                                    level == AccentPattern.ACCENT_HIGH -> StudioAmber.copy(alpha = 0.78f)
+                                    level == AccentPattern.ACCENT_NORMAL -> TextSecondary
+                                    else -> TextMuted.copy(alpha = 0.55f)
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Tap any beat to cycle: Accent • Normal • Mute",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
-            Text(
-                text = "Local only",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary.copy(alpha = 0.7f)
-            )
-        }
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = "Tap beats to customize accents",
+            fontSize = 11.sp,
+            color = TextMuted
+        )
     }
 }

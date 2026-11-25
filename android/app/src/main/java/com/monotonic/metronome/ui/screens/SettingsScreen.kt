@@ -1,11 +1,11 @@
 package com.monotonic.metronome.ui.screens
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -26,22 +27,19 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,17 +50,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.monotonic.metronome.data.PreferencesRepository
 import com.monotonic.metronome.model.AppUiState
 import com.monotonic.metronome.model.ClickSoundOption
-import com.monotonic.metronome.ui.theme.AccentAmber
-import com.monotonic.metronome.ui.theme.AccentCyan
-import com.monotonic.metronome.ui.theme.AccentEmerald
-import com.monotonic.metronome.ui.theme.DarkBackground
-import com.monotonic.metronome.ui.theme.DarkBorder
-import com.monotonic.metronome.ui.theme.DarkSurface
-import com.monotonic.metronome.ui.theme.DarkSurfaceVariant
-import com.monotonic.metronome.ui.theme.ErrorRose
+import com.monotonic.metronome.ui.components.PrecisionSlider
+import com.monotonic.metronome.ui.theme.ContrastInk
+import com.monotonic.metronome.ui.theme.HairlineDivider
+import com.monotonic.metronome.ui.theme.ObsidianCanvas
+import com.monotonic.metronome.ui.theme.StatusAmber
+import com.monotonic.metronome.ui.theme.StatusCoral
+import com.monotonic.metronome.ui.theme.StatusEmerald
+import com.monotonic.metronome.ui.theme.StudioAmber
+import com.monotonic.metronome.ui.theme.SurfaceGrouped
+import com.monotonic.metronome.ui.theme.SurfaceTonal
+import com.monotonic.metronome.ui.theme.SurfaceTonalElevated
+import com.monotonic.metronome.ui.theme.SurfaceTonalHigh
+import com.monotonic.metronome.ui.theme.TextMuted
 import com.monotonic.metronome.ui.theme.TextPrimary
 import com.monotonic.metronome.ui.theme.TextSecondary
 import java.util.Locale
@@ -84,34 +88,36 @@ fun SettingsScreen(
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = DarkBackground,
+        containerColor = ObsidianCanvas,
         topBar = {
-            Surface(
-                color = DarkBackground,
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Row(
+                IconButton(
+                    onClick = onBack,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(SurfaceTonal)
                 ) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = "Back to metronome",
-                            tint = TextPrimary
-                        )
-                    }
-                    Text(
-                        text = "Settings",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back to metronome",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
+                Text(
+                    text = "Settings",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimary
+                )
             }
         }
     ) { innerPadding ->
@@ -122,93 +128,117 @@ fun SettingsScreen(
                 .navigationBarsPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp)
         ) {
-            // 1. Audio & Sound
-            SettingsCard(title = "Audio & Sound") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // 1. SOUND
+            SettingsSection(title = "SOUND") {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Master Volume",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Click Sound",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
                         color = TextPrimary
                     )
-                    Text(
-                        text = "${(uiState.masterVolume * 100f).roundToInt()}%",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                        color = AccentAmber,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
 
-                Slider(
-                    value = uiState.masterVolume,
-                    onValueChange = onMasterVolumeChanged,
-                    valueRange = 0f..1f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = AccentAmber,
-                        activeTrackColor = AccentAmber,
-                        inactiveTrackColor = DarkSurfaceVariant
-                    )
-                )
-
-                Text(
-                    text = "Click Sound",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextPrimary
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ClickSoundOption.entries.forEach { option ->
-                        val selected = uiState.clickSound == option
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (selected) AccentAmber.copy(alpha = 0.2f) else DarkSurfaceVariant,
-                            border = BorderStroke(
-                                width = if (selected) 1.5.dp else 1.dp,
-                                color = if (selected) AccentAmber else DarkBorder
-                            ),
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = ObsidianCanvas,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onClickSoundSelected(option) }
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = option.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (selected) AccentAmber else TextSecondary
-                                )
+                            ClickSoundOption.entries.forEach { option ->
+                                val selected = uiState.clickSound == option
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(38.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) StudioAmber.copy(alpha = 0.20f) else Color.Transparent
+                                        )
+                                        .clickable { onClickSoundSelected(option) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = option.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selected) StudioAmber else TextSecondary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                HorizontalDivider(color = DarkBorder)
+                SettingsDivider()
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Visual Beat Flash",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Master Volume",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Pulse visualizer frame edge on each beat",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "${(uiState.masterVolume * 100f).roundToInt()}%",
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            color = StudioAmber
+                        )
+                    }
+
+                    PrecisionSlider(
+                        value = uiState.masterVolume,
+                        onValueChange = onMasterVolumeChanged,
+                        valueRange = 0f..1f
+                    )
+                }
+
+                SettingsDivider()
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Visual Beat Flash",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Glow and pulse beat bars on each beat",
+                            fontSize = 12.sp,
                             color = TextSecondary
                         )
                     }
@@ -216,245 +246,337 @@ fun SettingsScreen(
                         checked = uiState.visualBeatFlash,
                         onCheckedChange = onVisualBeatFlashChanged,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = DarkBackground,
-                            checkedTrackColor = AccentEmerald
+                            checkedThumbColor = ContrastInk,
+                            checkedTrackColor = StudioAmber,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = SurfaceTonalHigh,
+                            uncheckedBorderColor = Color.Transparent
                         )
                     )
                 }
             }
 
-            // 2. Hardware Calibration
-            SettingsCard(title = "Hardware Calibration") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // 2. CALIBRATION
+            SettingsSection(title = "CALIBRATION") {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Manual Timing Offset",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Override OEM audio driver skew (-50ms to +50ms)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                    TextButton(
-                        onClick = { onManualOffsetChanged(0) },
-                        enabled = uiState.manualOffsetMs != 0,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "Manual Timing Offset",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Fine-tune audio hardware skew (-50 to +50 ms)",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
                         Text(
                             text = String.format(Locale.US, "%+d ms", uiState.manualOffsetMs),
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = AccentAmber
+                            fontSize = 15.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (uiState.manualOffsetMs != 0) StudioAmber else TextSecondary
+                        )
+                    }
+
+                    PrecisionSlider(
+                        value = uiState.manualOffsetMs.toFloat(),
+                        onValueChange = { onManualOffsetChanged(it.roundToInt()) },
+                        valueRange = PreferencesRepository.MIN_MANUAL_OFFSET_MS.toFloat()..
+                            PreferencesRepository.MAX_MANUAL_OFFSET_MS.toFloat(),
+                        bipolarCenter = 0f,
+                        snapToIntegers = true
+                    )
+
+                    Button(
+                        onClick = { onManualOffsetChanged(0) },
+                        enabled = uiState.manualOffsetMs != 0,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SurfaceTonalHigh,
+                            contentColor = TextPrimary,
+                            disabledContainerColor = SurfaceTonal,
+                            disabledContentColor = TextMuted
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                    ) {
+                        Text(
+                            text = "Reset to 0 ms",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            // 3. DIAGNOSTICS
+            SettingsSection(title = "DIAGNOSTICS") {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (uiState.isInRoom) {
+                        DiagnosticRow(
+                            label = "Min / Median RTT",
+                            value = String.format(
+                                Locale.US,
+                                "%.2f ms / %.2f ms",
+                                uiState.clockSync.minRttMs,
+                                uiState.clockSync.medianRttMs
+                            )
+                        )
+                        DiagnosticRow(
+                            label = "Clock Offset",
+                            value = String.format(Locale.US, "%+.3f ms", uiState.clockSync.offsetMs)
+                        )
+                        DiagnosticRow(
+                            label = "Sync Jitter (σ)",
+                            value = String.format(Locale.US, "%.3f ms", uiState.clockSync.jitterMs)
+                        )
+                    } else {
+                        DiagnosticRow(
+                            label = "Network Clock Sync",
+                            value = "Solo Mode",
+                            valueColor = TextSecondary
                         )
                     }
                 }
 
-                Slider(
-                    value = uiState.manualOffsetMs.toFloat(),
-                    onValueChange = { onManualOffsetChanged(it.roundToInt()) },
-                    valueRange = PreferencesRepository.MIN_MANUAL_OFFSET_MS.toFloat()..
-                        PreferencesRepository.MAX_MANUAL_OFFSET_MS.toFloat(),
-                    steps = 99,
-                    colors = SliderDefaults.colors(
-                        thumbColor = AccentAmber,
-                        activeTrackColor = AccentAmber,
-                        inactiveTrackColor = DarkSurfaceVariant
-                    )
-                )
+                SettingsDivider()
 
-                OutlinedButton(
-                    onClick = { onManualOffsetChanged(0) },
-                    enabled = uiState.manualOffsetMs != 0,
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, DarkBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("Reset to 0 ms")
-                }
-            }
-
-            // 3. Sync Diagnostics
-            SettingsCard(title = "Sync Diagnostics") {
-                if (uiState.isInRoom) {
                     DiagnosticRow(
-                        label = "Min / Median RTT",
+                        label = "Oboe Hardware Latency",
                         value = String.format(
                             Locale.US,
-                            "%.2f ms / %.2f ms",
-                            uiState.clockSync.minRttMs,
-                            uiState.clockSync.medianRttMs
+                            "%.2f ms",
+                            uiState.audioDiagnostics.hardwareLatencyMs
                         )
                     )
                     DiagnosticRow(
-                        label = "Clock Offset",
-                        value = String.format(Locale.US, "%+.3f ms", uiState.clockSync.offsetMs)
+                        label = "Active Sample Rate",
+                        value = "${uiState.audioDiagnostics.sampleRateHz} Hz"
                     )
-                    DiagnosticRow(
-                        label = "Sync Jitter (σ)",
-                        value = String.format(Locale.US, "%.3f ms", uiState.clockSync.jitterMs)
-                    )
-                } else {
-                    DiagnosticRow(
-                        label = "Network Clock Sync",
-                        value = "Offline / Solo Mode",
-                        valueColor = TextSecondary
-                    )
-                }
-
-                HorizontalDivider(color = DarkBorder)
-
-                DiagnosticRow(
-                    label = "Oboe Hardware Latency",
-                    value = String.format(
-                        Locale.US,
-                        "%.2f ms",
-                        uiState.audioDiagnostics.hardwareLatencyMs
-                    )
-                )
-                DiagnosticRow(
-                    label = "Active Sample Rate",
-                    value = "${uiState.audioDiagnostics.sampleRateHz} Hz"
-                )
-                DiagnosticRow(
-                    label = "Oboe Sharing Mode",
-                    value = if (uiState.audioDiagnostics.isExclusiveMode) {
-                        "Exclusive (${uiState.audioDiagnostics.audioApiName})"
-                    } else {
-                        "Shared (${uiState.audioDiagnostics.audioApiName})"
-                    },
-                    valueColor = if (uiState.audioDiagnostics.isExclusiveMode) {
-                        AccentEmerald
-                    } else {
-                        AccentCyan
-                    }
-                )
-
-                if (uiState.isInRoom) {
-                    OutlinedButton(
-                        onClick = onResyncNow,
-                        enabled = !uiState.clockSync.isSyncing,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, AccentAmber.copy(alpha = 0.6f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentAmber),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (uiState.clockSync.isSyncing) "Syncing..." else "Resync Now",
-                            fontWeight = FontWeight.SemiBold
+                            text = "Oboe Sharing Mode",
+                            fontSize = 14.sp,
+                            color = TextSecondary
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (uiState.audioDiagnostics.isExclusiveMode) {
+                                            StatusEmerald
+                                        } else {
+                                            StatusAmber
+                                        }
+                                    )
+                            )
+                            Text(
+                                text = if (uiState.audioDiagnostics.isExclusiveMode) {
+                                    "Exclusive (${uiState.audioDiagnostics.audioApiName})"
+                                } else {
+                                    "Shared (${uiState.audioDiagnostics.audioApiName})"
+                                },
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Medium,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+
+                    if (uiState.isInRoom) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Button(
+                            onClick = onResyncNow,
+                            enabled = !uiState.clockSync.isSyncing,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SurfaceTonalHigh,
+                                contentColor = StudioAmber,
+                                disabledContainerColor = SurfaceTonal,
+                                disabledContentColor = TextMuted
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (uiState.clockSync.isSyncing) "Syncing..." else "Resync Now",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
 
-            // 4. Room & Server
-            SettingsCard(title = "Room & Server") {
-                OutlinedTextField(
-                    value = uiState.serverUrl,
-                    onValueChange = onServerUrlChanged,
-                    label = { Text("Server WebSocket URL") },
-                    placeholder = { Text("ws://192.168.1.100:8000/ws") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Done
-                    ),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentAmber,
-                        unfocusedBorderColor = DarkBorder,
-                        focusedContainerColor = DarkSurfaceVariant,
-                        unfocusedContainerColor = DarkSurfaceVariant
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+            // 4. ROOM
+            SettingsSection(title = "ROOM") {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    TextField(
+                        value = uiState.serverUrl,
+                        onValueChange = onServerUrlChanged,
+                        label = { Text("Server WebSocket URL") },
+                        placeholder = { Text("ws://192.168.1.100:8000/ws") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Done
+                        ),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = SurfaceTonalElevated,
+                            unfocusedContainerColor = SurfaceTonalElevated,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            cursorColor = StudioAmber,
+                            focusedLabelColor = StudioAmber,
+                            unfocusedLabelColor = TextSecondary,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedPlaceholderColor = TextMuted,
+                            unfocusedPlaceholderColor = TextMuted
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                if (uiState.isInRoom) {
-                    OutlinedButton(
-                        onClick = {
-                            onLeaveRoom()
-                            onBack()
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, ErrorRose.copy(alpha = 0.7f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRose),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.ExitToApp,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Leave Room (${uiState.activeRoom?.roomCode})",
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = onOpenRoomSheetFromSettings,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, AccentAmber.copy(alpha = 0.6f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentAmber),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Sync,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Create or Join Sync Room", fontWeight = FontWeight.SemiBold)
+                    if (uiState.isInRoom) {
+                        Button(
+                            onClick = {
+                                onLeaveRoom()
+                                onBack()
+                            },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = StatusCoral.copy(alpha = 0.14f),
+                                contentColor = StatusCoral
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ExitToApp,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Leave Room (${uiState.activeRoom?.roomCode})",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
+                        Button(
+                            onClick = onOpenRoomSheetFromSettings,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SurfaceTonalHigh,
+                                contentColor = TextPrimary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Sync,
+                                contentDescription = null,
+                                tint = StudioAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Create or Join Sync Room",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
-private fun SettingsCard(
+private fun SettingsSection(
     title: String,
-    content: @Composable () -> Unit
+    content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = DarkSurface,
-        border = BorderStroke(1.dp, DarkBorder),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = title,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.6.sp,
+            color = TextSecondary,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = SurfaceGrouped,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = AccentAmber
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                content = content
             )
-            content()
         }
     }
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        thickness = 1.dp,
+        color = HairlineDivider
+    )
 }
 
 @Composable
@@ -470,12 +592,13 @@ private fun DiagnosticRow(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
+            fontSize = 14.sp,
             color = TextSecondary
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            fontSize = 13.sp,
+            fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
             color = valueColor
         )

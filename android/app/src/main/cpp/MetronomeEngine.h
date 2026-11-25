@@ -83,7 +83,8 @@ public:
     }
 
     void setSoundProfile(int32_t profileIndex) noexcept {
-        const int32_t clamped = profileIndex < 0 ? 0 : (profileIndex > 2 ? 2 : profileIndex);
+        constexpr int32_t kMaxProfile = static_cast<int32_t>(ClickSynth::kNumSoundProfiles) - 1;
+        const int32_t clamped = profileIndex < 0 ? 0 : (profileIndex > kMaxProfile ? kMaxProfile : profileIndex);
         mSoundProfile.store(clamped, std::memory_order_relaxed);
     }
 
@@ -121,7 +122,7 @@ public:
 
 private:
     struct ActiveVoice {
-        SoundProfile profile{SoundProfile::DigitalClick};
+        SoundProfile profile{SoundProfile::Classic};
         ClickType type{ClickType::Regular};
         size_t pos{0};
         bool active{false};

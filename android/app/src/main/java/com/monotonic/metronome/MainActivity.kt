@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
                             onRoomCodeChanged = viewModel::onRoomCodeInputChanged,
                             onCreateRoom = viewModel::createRoom,
                             onJoinRoom = viewModel::joinRoom,
+                            onLeaveRoom = viewModel::leaveRoom,
                             onShowSnackbar = viewModel::showSnackbar,
                             onConsumeSnackbar = viewModel::consumeSnackbar
                         )

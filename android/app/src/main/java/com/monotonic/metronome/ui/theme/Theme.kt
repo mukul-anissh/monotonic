@@ -10,48 +10,60 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val DarkBackground = Color(0xFF0D0F14)
-val DarkSurface = Color(0xFF171A21)
-val DarkSurfaceVariant = Color(0xFF212632)
-val DarkBorder = Color(0xFF2C3344)
+val ObsidianCanvas = Color(0xFF0D0E11)
+val DarkBackground = ObsidianCanvas
 
-val AccentAmber = Color(0xFFFFB300)
-val AccentEmerald = Color(0xFF00E5A0)
-val AccentCyan = Color(0xFF38BDF8)
-val WarningAmber = Color(0xFFF59E0B)
-val ErrorRose = Color(0xFFF43F5E)
+val SurfaceGrouped = Color(0xFF16181D)
+val SurfaceTonal = Color(0xFF181A20)
+val SurfaceTonalElevated = Color(0xFF1C1F26)
+val SurfaceTonalHigh = Color(0xFF22252E)
 
-val TextPrimary = Color(0xFFF3F4F6)
-val TextSecondary = Color(0xFF9CA3AF)
+val BeatNormalSurface = Color(0xFF232630)
+val BeatMuteSurface = Color(0xFF16181E)
+val HairlineDivider = Color(0xFF232630)
+
+val StudioAmber = Color(0xFFF5A623)
+val ContrastSurface = Color(0xFFF2F3F5)
+val ContrastInk = Color(0xFF0D0E11)
+
+val TextPrimary = Color(0xFFF4F5F7)
+val TextSecondary = Color(0xFF8E93A2)
+val TextMuted = Color(0xFF5D6270)
+
+// Semantic status dot / route-warning tokens only
+val StatusEmerald = Color(0xFF34B37B)
+val StatusAmber = Color(0xFFF5A623)
+val StatusCoral = Color(0xFFE05A6D)
 
 private val MonotonicDarkColorScheme = darkColorScheme(
-    primary = AccentAmber,
-    onPrimary = Color(0xFF14110A),
-    secondary = AccentEmerald,
-    onSecondary = Color(0xFF051A12),
-    tertiary = AccentCyan,
-    background = DarkBackground,
+    primary = StudioAmber,
+    onPrimary = ContrastInk,
+    secondary = ContrastSurface,
+    onSecondary = ContrastInk,
+    tertiary = StudioAmber,
+    background = ObsidianCanvas,
     onBackground = TextPrimary,
-    surface = DarkSurface,
+    surface = SurfaceGrouped,
     onSurface = TextPrimary,
-    surfaceVariant = DarkSurfaceVariant,
+    surfaceVariant = SurfaceTonal,
     onSurfaceVariant = TextSecondary,
-    outline = DarkBorder,
-    error = ErrorRose,
+    outline = HairlineDivider,
+    error = StatusCoral,
     onError = Color.White
 )
 
 private val MonotonicTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 56.sp,
-        letterSpacing = (-1.5).sp
+        fontWeight = FontWeight.Medium,
+        fontSize = 88.sp,
+        lineHeight = 90.sp,
+        letterSpacing = (-3).sp
     ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 24.sp
+        fontSize = 22.sp
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -63,10 +75,20 @@ private val MonotonicTypography = Typography(
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp
     ),
+    bodySmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp
+    ),
     labelMedium = TextStyle(
-        fontFamily = FontFamily.Monospace,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp
     )
 )
 

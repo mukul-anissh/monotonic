@@ -283,8 +283,9 @@ oboe::DataCallbackResult MetronomeEngine::onAudioReady(
 
     const uint32_t accentBitmask = mAccentBitmask.load(std::memory_order_relaxed);
     const int32_t rawProfile = mSoundProfile.load(std::memory_order_relaxed);
+    constexpr int32_t kMaxProfile = static_cast<int32_t>(ClickSynth::kNumSoundProfiles) - 1;
     const SoundProfile activeProfile = static_cast<SoundProfile>(
-        rawProfile < 0 ? 0 : (rawProfile > 2 ? 2 : rawProfile)
+        rawProfile < 0 ? 0 : (rawProfile > kMaxProfile ? kMaxProfile : rawProfile)
     );
 
     for (int32_t i = 0; i < numFrames; ++i) {

@@ -1,4 +1,4 @@
-# Monotonic — Sub-10ms Synced Ensemble Metronome
+# Monotonic: Sub 10ms Synced Ensemble Metronome
 
 Monotonic lets multiple musicians join a virtual rehearsal room on Android and hear the exact same beat simultaneously over wired earphones (3.5mm or USB-C), targeting **under 10ms synchronization accuracy** across devices.
 

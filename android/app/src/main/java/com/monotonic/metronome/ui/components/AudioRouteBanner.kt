@@ -1,8 +1,6 @@
 package com.monotonic.metronome.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,23 +10,25 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.monotonic.metronome.model.AudioRouteState
 import com.monotonic.metronome.model.AudioRouteStatus
-import com.monotonic.metronome.ui.theme.ErrorRose
+import com.monotonic.metronome.ui.theme.StatusAmber
+import com.monotonic.metronome.ui.theme.StatusCoral
+import com.monotonic.metronome.ui.theme.SurfaceTonal
 import com.monotonic.metronome.ui.theme.TextSecondary
-import com.monotonic.metronome.ui.theme.WarningAmber
 
 /**
- * Compact warning banner displayed only while synced to a room when wired
- * earphones (3.5mm or USB-C) are not connected.
+ * Slim borderless tonal pill displayed beneath the top bar only when synced to a room
+ * without wired earphones (3.5mm or USB-C).
  */
 @Composable
 fun AudioRouteBanner(
@@ -38,53 +38,42 @@ fun AudioRouteBanner(
     if (routeState.status == AudioRouteStatus.WIRED_READY) return
 
     val isBluetooth = routeState.status == AudioRouteStatus.BLUETOOTH_WARNING
-    val accentColor = if (isBluetooth) ErrorRose else WarningAmber
+    val dotAccent = if (isBluetooth) StatusCoral else StatusAmber
     val icon = if (isBluetooth) {
         Icons.Rounded.BluetoothAudio
     } else {
         Icons.AutoMirrored.Rounded.VolumeUp
     }
-    val title = if (isBluetooth) {
-        "Bluetooth Active (${routeState.deviceLabel})"
+    val text = if (isBluetooth) {
+        "Bluetooth (${routeState.deviceLabel}) · Plug in wired earphones"
     } else {
-        "Phone Speaker Active"
-    }
-    val message = if (isBluetooth) {
-        "Plug in wired 3.5mm/USB-C earphones to avoid 100–250ms wireless audio delay."
-    } else {
-        "Plug in wired 3.5mm/USB-C earphones for sub-10ms ensemble sync."
+        "Phone speaker active · Use wired earphones for sync"
     }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = accentColor.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f))
+        shape = RoundedCornerShape(50),
+        color = SurfaceTonal
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = title,
-                tint = accentColor,
-                modifier = Modifier.size(18.dp)
+                contentDescription = text,
+                tint = dotAccent,
+                modifier = Modifier.size(15.dp)
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = accentColor
-                )
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
-                )
-            }
+            Text(
+                text = text,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

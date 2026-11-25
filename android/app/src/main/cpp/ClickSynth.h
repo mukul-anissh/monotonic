@@ -13,9 +13,10 @@ enum class ClickType : int32_t {
 };
 
 enum class SoundProfile : int32_t {
-    DigitalClick = 0,
-    Woodblock = 1,
-    SoftTick = 2
+    Classic = 0,
+    DigitalClick = 1,
+    Woodblock = 2,
+    SoftTick = 3
 };
 
 /**
@@ -25,7 +26,7 @@ enum class SoundProfile : int32_t {
  */
 class ClickSynth {
 public:
-    static constexpr size_t kNumSoundProfiles = 3;
+    static constexpr size_t kNumSoundProfiles = 4;
     static constexpr size_t kNumClickTypes = 3;
 
     void generate(int32_t sampleRate);
@@ -34,6 +35,24 @@ public:
     int32_t sampleRate() const noexcept { return mSampleRate; }
 
 private:
+    struct ModalComponent {
+        double freqHz;
+        double amplitude;
+        double decayTauSec;
+    };
+
+    static std::vector<float> buildMechanicalClick(
+        int32_t sampleRate,
+        const ModalComponent* modes,
+        size_t modeCount,
+        double strikerBandpassHz,
+        double strikerSnapStartHz,
+        double strikerSnapEndHz,
+        double strikerMix,
+        float targetPeak,
+        uint32_t noiseSeed
+    );
+
     static std::vector<float> buildDampedSineBurst(
         int32_t sampleRate,
         double frequencyHz,

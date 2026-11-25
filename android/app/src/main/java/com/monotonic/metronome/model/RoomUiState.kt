@@ -26,13 +26,14 @@ enum class SyncQuality {
 }
 
 enum class ClickSoundOption(val id: Int, val label: String) {
-    DIGITAL_CLICK(0, "Digital Click"),
-    WOODBLOCK(1, "Woodblock"),
-    SOFT_TICK(2, "Soft Tick");
+    CLASSIC(0, "Classic"),
+    DIGITAL_CLICK(1, "Digital"),
+    WOODBLOCK(2, "Woodblock"),
+    SOFT_TICK(3, "Soft Tick");
 
     companion object {
         fun fromId(id: Int): ClickSoundOption =
-            entries.firstOrNull { it.id == id } ?: DIGITAL_CLICK
+            entries.firstOrNull { it.id == id } ?: CLASSIC
     }
 }
 
@@ -53,7 +54,8 @@ data class TimeSignaturePreset(
             TimeSignaturePreset("5/4", 5),
             TimeSignaturePreset("7/8", 7),
             TimeSignaturePreset("9/8", 9),
-            TimeSignaturePreset("12/8", 12)
+            TimeSignaturePreset("12/8", 12),
+            TimeSignaturePreset("2/4", 2)
         )
     }
 }
@@ -64,7 +66,6 @@ data class RoomSnapshot(
     val isPlaying: Boolean = false,
     val bpm: Double = 120.0,
     val beatsPerBar: Int = 4,
-    val subdivision: Int = 1,
     val startServerTimeNs: Long = 0L,
     val stateVersion: Long = 0L
 )
@@ -79,9 +80,10 @@ data class AudioDiagnostics(
 data class AppUiState(
     val soloState: SoloTransportState = SoloTransportState(),
     val activeRoom: RoomSnapshot? = null,
+    val localSubdivision: Int = 1,
     val accentLevels: List<Int> = AccentPattern.defaultPattern(4),
     val masterVolume: Float = 0.85f,
-    val clickSound: ClickSoundOption = ClickSoundOption.DIGITAL_CLICK,
+    val clickSound: ClickSoundOption = ClickSoundOption.CLASSIC,
     val visualBeatFlash: Boolean = true,
     val manualOffsetMs: Int = 0,
     val serverUrl: String = "ws://192.168.1.100:8000/ws",
@@ -110,7 +112,7 @@ data class AppUiState(
         get() = activeRoom?.beatsPerBar ?: soloState.beatsPerBar
 
     val subdivision: Int
-        get() = activeRoom?.subdivision ?: soloState.subdivision
+        get() = localSubdivision
 
     val syncQuality: SyncQuality
         get() {

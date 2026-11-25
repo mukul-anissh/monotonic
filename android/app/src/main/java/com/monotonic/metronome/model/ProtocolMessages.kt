@@ -40,8 +40,7 @@ data class StopMessage(
 data class UpdateTransportMessage(
     val type: String = "update_transport",
     val bpm: Double? = null,
-    @SerialName("beats_per_bar") val beatsPerBar: Int? = null,
-    val subdivision: Int? = null
+    @SerialName("beats_per_bar") val beatsPerBar: Int? = null
 )
 
 @Serializable
@@ -60,7 +59,7 @@ data class RoomStateEvent(
     @SerialName("is_playing") val isPlaying: Boolean,
     val bpm: Double,
     @SerialName("beats_per_bar") val beatsPerBar: Int,
-    val subdivision: Int,
+    val subdivision: Int = 1,
     @SerialName("start_server_time_ns") val startServerTimeNs: Long,
     @SerialName("state_version") val stateVersion: Long
 )

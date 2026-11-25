@@ -3,16 +3,17 @@ package com.monotonic.metronome.ui.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,11 +32,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.monotonic.metronome.sync.SoloScheduler
-import com.monotonic.metronome.ui.theme.AccentAmber
-import com.monotonic.metronome.ui.theme.DarkBorder
-import com.monotonic.metronome.ui.theme.DarkSurface
-import com.monotonic.metronome.ui.theme.DarkSurfaceVariant
-import com.monotonic.metronome.ui.theme.ErrorRose
+import com.monotonic.metronome.ui.theme.ContrastInk
+import com.monotonic.metronome.ui.theme.ContrastSurface
+import com.monotonic.metronome.ui.theme.StatusCoral
+import com.monotonic.metronome.ui.theme.StudioAmber
+import com.monotonic.metronome.ui.theme.SurfaceGrouped
+import com.monotonic.metronome.ui.theme.SurfaceTonalElevated
+import com.monotonic.metronome.ui.theme.SurfaceTonalHigh
+import com.monotonic.metronome.ui.theme.TextMuted
 import com.monotonic.metronome.ui.theme.TextPrimary
 import com.monotonic.metronome.ui.theme.TextSecondary
 import kotlin.math.roundToInt
@@ -67,17 +72,18 @@ fun BpmInputDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = DarkSurface,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = SurfaceGrouped,
         titleContentColor = TextPrimary,
         title = {
             Text(
                 text = "Set Tempo",
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                TextField(
                     value = textValue,
                     onValueChange = { next ->
                         val filtered = next.text.filter { it.isDigit() || it == '.' }
@@ -87,6 +93,7 @@ fun BpmInputDialog(
                     },
                     label = { Text("BPM") },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     isError = textValue.text.isNotEmpty() && !isValid,
                     textStyle = MaterialTheme.typography.headlineMedium.copy(
                         fontFamily = FontFamily.Monospace,
@@ -103,12 +110,20 @@ fun BpmInputDialog(
                             }
                         }
                     ),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentAmber,
-                        unfocusedBorderColor = DarkBorder,
-                        focusedContainerColor = DarkSurfaceVariant,
-                        unfocusedContainerColor = DarkSurfaceVariant,
-                        errorBorderColor = ErrorRose
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = SurfaceTonalElevated,
+                        unfocusedContainerColor = SurfaceTonalElevated,
+                        errorContainerColor = SurfaceTonalElevated,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        errorIndicatorColor = Color.Transparent,
+                        cursorColor = StudioAmber,
+                        focusedLabelColor = StudioAmber,
+                        unfocusedLabelColor = TextSecondary,
+                        errorLabelColor = StatusCoral,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        errorTextColor = StatusCoral
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -117,7 +132,7 @@ fun BpmInputDialog(
                 Text(
                     text = "Allowed range: 20 to 500 BPM",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (textValue.text.isNotEmpty() && !isValid) ErrorRose else TextSecondary
+                    color = if (textValue.text.isNotEmpty() && !isValid) StatusCoral else TextSecondary
                 )
             }
         },
@@ -129,9 +144,12 @@ fun BpmInputDialog(
                     }
                 },
                 enabled = isValid,
+                shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentAmber,
-                    contentColor = DarkSurface
+                    containerColor = ContrastSurface,
+                    contentColor = ContrastInk,
+                    disabledContainerColor = SurfaceTonalHigh,
+                    disabledContentColor = TextMuted
                 )
             ) {
                 Text("Confirm", fontWeight = FontWeight.Bold)
