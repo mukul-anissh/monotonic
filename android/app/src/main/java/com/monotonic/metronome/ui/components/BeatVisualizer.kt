@@ -49,7 +49,7 @@ import com.monotonic.metronome.ui.theme.TextSecondary
  * Borderless animated per-beat accent strip rendered directly on the dark canvas,
  * synced to the C++ Oboe engine's lock-free atomic beat index and sequence counter.
  *
- * Tapping any beat cycles local state: Accent (2) -> Normal (1) -> Mute (0).
+ * Tapping any beat cycles local state: Normal (1) -> Accent (2) -> Mute (0) -> Normal (1).
  */
 @Composable
 fun BeatVisualizer(

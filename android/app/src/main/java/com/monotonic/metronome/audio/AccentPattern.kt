@@ -41,13 +41,13 @@ object AccentPattern {
     }
 
     /**
-     * Cycles a beat's accent state: Accent (2) -> Normal (1) -> Mute (0) -> Accent (2).
+     * Cycles a beat's accent state: Normal (1) -> Accent (2) -> Mute (0) -> Normal (1).
      */
     fun cycleLevel(current: Int): Int {
         return when (current) {
-            ACCENT_HIGH -> ACCENT_NORMAL
-            ACCENT_NORMAL -> ACCENT_MUTE
-            else -> ACCENT_HIGH
+            ACCENT_NORMAL -> ACCENT_HIGH
+            ACCENT_HIGH -> ACCENT_MUTE
+            else -> ACCENT_NORMAL
         }
     }
 

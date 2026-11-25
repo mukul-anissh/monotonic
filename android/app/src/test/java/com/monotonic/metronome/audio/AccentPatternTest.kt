@@ -11,9 +11,15 @@ class AccentPatternTest {
         assertEquals(listOf(2, 1, 1, 1), AccentPattern.defaultPattern(4))
         assertEquals(16, AccentPattern.defaultPattern(20).size)
 
-        assertEquals(1, AccentPattern.cycleLevel(2))
-        assertEquals(0, AccentPattern.cycleLevel(1))
-        assertEquals(2, AccentPattern.cycleLevel(0))
+        // Full cycle: Normal (1) -> Accent (2) -> Mute (0) -> Normal (1)
+        val first = AccentPattern.cycleLevel(AccentPattern.ACCENT_NORMAL)
+        assertEquals(AccentPattern.ACCENT_HIGH, first)
+
+        val second = AccentPattern.cycleLevel(first)
+        assertEquals(AccentPattern.ACCENT_MUTE, second)
+
+        val third = AccentPattern.cycleLevel(second)
+        assertEquals(AccentPattern.ACCENT_NORMAL, third)
     }
 
     @Test
