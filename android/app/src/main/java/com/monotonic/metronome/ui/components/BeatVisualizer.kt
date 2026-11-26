@@ -145,9 +145,8 @@ fun BeatVisualizer(
                                 StudioAmber.copy(alpha = 0.42f + 0.50f * activePulse)
                             isCurrent ->
                                 Color(0xFF282C38)
-                            level == AccentPattern.ACCENT_HIGH ->
-                                StudioAmber.copy(alpha = 0.25f)
-                            level == AccentPattern.ACCENT_NORMAL ->
+                            level == AccentPattern.ACCENT_HIGH ||
+                                level == AccentPattern.ACCENT_NORMAL ->
                                 BeatNormalSurface
                             else ->
                                 BeatMuteSurface
@@ -213,17 +212,7 @@ fun BeatVisualizer(
                                         )
                                         .clip(RoundedCornerShape(cornerRadius))
                                         .background(animatedFillColor)
-                                ) {
-                                    if (level == AccentPattern.ACCENT_HIGH) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(4.dp)
-                                                .align(Alignment.TopCenter)
-                                                .background(StudioAmber)
-                                        )
-                                    }
-                                }
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(6.dp))
@@ -235,8 +224,8 @@ fun BeatVisualizer(
                                 color = when {
                                     isCurrent && level != AccentPattern.ACCENT_MUTE -> StudioAmber
                                     isCurrent -> TextSecondary
-                                    level == AccentPattern.ACCENT_HIGH -> StudioAmber.copy(alpha = 0.78f)
-                                    level == AccentPattern.ACCENT_NORMAL -> TextSecondary
+                                    level == AccentPattern.ACCENT_HIGH ||
+                                        level == AccentPattern.ACCENT_NORMAL -> TextSecondary
                                     else -> TextMuted.copy(alpha = 0.55f)
                                 }
                             )

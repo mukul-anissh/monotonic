@@ -958,12 +958,14 @@ private fun ExpandableServerPicker(
                     }
                 }
 
-                Text(
-                    text = manualAddressError ?: "ws:// and /ws added automatically",
-                    fontSize = 11.sp,
-                    color = if (manualAddressError != null) StatusCoral else TextMuted,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
+                manualAddressError?.takeIf { it.isNotBlank() }?.let { errorText ->
+                    Text(
+                        text = errorText,
+                        fontSize = 11.sp,
+                        color = StatusCoral,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
             }
         }
     }

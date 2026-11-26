@@ -527,12 +527,14 @@ fun SettingsScreen(
                             }
                         }
 
-                        Text(
-                            text = serverDraftError ?: "ws:// and /ws added automatically",
-                            fontSize = 11.sp,
-                            color = if (serverDraftError != null) StatusCoral else TextMuted,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
+                        serverDraftError?.let { errorText ->
+                            Text(
+                                text = errorText,
+                                fontSize = 11.sp,
+                                color = StatusCoral,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                        }
                     }
 
                     if (uiState.isInRoom) {

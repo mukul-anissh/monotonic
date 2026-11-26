@@ -18,10 +18,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -78,7 +76,6 @@ import com.monotonic.metronome.ui.theme.StatusAmber
 import com.monotonic.metronome.ui.theme.StudioAmber
 import com.monotonic.metronome.ui.theme.SurfaceTonalHigh
 import com.monotonic.metronome.ui.theme.TextPrimary
-import com.monotonic.metronome.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -385,13 +382,6 @@ fun QrScannerOverlay(
                 color = TextPrimary,
                 textAlign = TextAlign.Center
             )
-            Text(
-                text = "Works 100% offline on local Wi-Fi",
-                fontSize = 12.sp,
-                color = TextSecondary,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(6.dp))
         }
     }
 }
