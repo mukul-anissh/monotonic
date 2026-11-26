@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -41,6 +42,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,11 +86,13 @@ fun SettingsScreen(
     onVisualBeatFlashChanged: (Boolean) -> Unit,
     onManualOffsetChanged: (Int) -> Unit,
     onResyncNow: () -> Unit,
-    onServerUrlChanged: (String) -> Unit,
+    onApplyManualServerAddress: (String) -> String?,
     onLeaveRoom: () -> Unit,
     onOpenRoomSheetFromSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var serverDraft by remember(uiState.serverUrl) { mutableStateOf(uiState.serverUrl) }
+    var serverDraftError by remember(uiState.serverUrl) { mutableStateOf<String?>(null) }
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = ObsidianCanvas,
@@ -455,32 +462,78 @@ fun SettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    TextField(
-                        value = uiState.serverUrl,
-                        onValueChange = onServerUrlChanged,
-                        label = { Text("Server WebSocket URL") },
-                        placeholder = { Text("ws://192.168.1.100:8000/ws") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Done
-                        ),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = SurfaceTonalElevated,
-                            unfocusedContainerColor = SurfaceTonalElevated,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            cursorColor = StudioAmber,
-                            focusedLabelColor = StudioAmber,
-                            unfocusedLabelColor = TextSecondary,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedPlaceholderColor = TextMuted,
-                            unfocusedPlaceholderColor = TextMuted
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextField(
+                                value = serverDraft,
+                                onValueChange = { next ->
+                                    serverDraft = next
+                                    serverDraftError = null
+                                },
+                                label = { Text("Server Address") },
+                                placeholder = { Text("192.168.1.5:6969 or domain") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Uri,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        serverDraftError = onApplyManualServerAddress(serverDraft)
+                                    }
+                                ),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = SurfaceTonalElevated,
+                                    unfocusedContainerColor = SurfaceTonalElevated,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    cursorColor = StudioAmber,
+                                    focusedLabelColor = StudioAmber,
+                                    unfocusedLabelColor = TextSecondary,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedPlaceholderColor = TextMuted,
+                                    unfocusedPlaceholderColor = TextMuted
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = StudioAmber,
+                                modifier = Modifier
+                                    .height(54.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        serverDraftError = onApplyManualServerAddress(serverDraft)
+                                    }
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Apply",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ContrastInk
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = serverDraftError ?: "ws:// and /ws added automatically",
+                            fontSize = 11.sp,
+                            color = if (serverDraftError != null) StatusCoral else TextMuted,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                    }
 
                     if (uiState.isInRoom) {
                         Button(

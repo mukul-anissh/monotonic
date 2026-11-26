@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Stop
@@ -80,13 +81,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.monotonic.metronome.model.AppUiState
 import com.monotonic.metronome.model.AudioRouteStatus
+import com.monotonic.metronome.model.DiscoveredServer
 import com.monotonic.metronome.model.SyncQuality
 import com.monotonic.metronome.model.TimeSignaturePreset
 import com.monotonic.metronome.ui.components.AudioRouteBanner
 import com.monotonic.metronome.ui.components.BeatVisualizer
 import com.monotonic.metronome.ui.components.BpmInputDialog
 import com.monotonic.metronome.ui.components.MeterSelectorSheet
+import com.monotonic.metronome.ui.components.QrScannerOverlay
 import com.monotonic.metronome.ui.components.RoomConnectionSheet
+import com.monotonic.metronome.ui.components.ShareRoomQrSheet
 import com.monotonic.metronome.ui.components.SubdivisionDots
 import com.monotonic.metronome.ui.components.SubdivisionSelectorSheet
 import com.monotonic.metronome.ui.components.TempoRuler
@@ -122,10 +126,21 @@ fun MetronomeScreen(
     onOpenRoomSheet: () -> Unit,
     onDismissRoomSheet: () -> Unit,
     onOpenSettings: () -> Unit,
-    onServerUrlChanged: (String) -> Unit,
+    onToggleServerEditor: () -> Unit,
+    onRescanServers: () -> Unit,
+    onSelectDiscoveredServer: (DiscoveredServer) -> Unit,
+    onApplyManualServerAddress: (String) -> String?,
     onRoomCodeChanged: (String) -> Unit,
     onCreateRoom: () -> Unit,
     onJoinRoom: () -> Unit,
+    onOpenShareQr: () -> Unit,
+    onDismissShareQr: () -> Unit,
+    onOpenQrScanner: () -> Unit,
+    onCloseQrScanner: () -> Unit,
+    onCameraPermissionDenied: () -> Unit,
+    onDismissCameraPermissionHint: () -> Unit,
+    onQrRoomInviteScanned: (String, String) -> Unit,
+    onQrServerUrlScanned: (String) -> Unit,
     onLeaveRoom: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     onConsumeSnackbar: () -> Unit,
@@ -190,37 +205,39 @@ fun MetronomeScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = ObsidianCanvas,
-        snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState) { data ->
-                Snackbar(
-                    snackbarData = data,
-                    containerColor = SurfaceTonalHigh,
-                    contentColor = TextPrimary,
-                    shape = RoundedCornerShape(16.dp)
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = ObsidianCanvas,
+            snackbarHost = {
+                SnackbarHost(hostState = snackbarHostState) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = SurfaceTonalHigh,
+                        contentColor = TextPrimary,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+            },
+            topBar = {
+                StageTopBar(
+                    uiState = uiState,
+                    onOpenRoomSheet = onOpenRoomSheet,
+                    onOpenShareQr = onOpenShareQr,
+                    onOpenSettings = onOpenSettings
+                )
+            },
+            bottomBar = {
+                PerformanceDock(
+                    isInRoom = uiState.isInRoom,
+                    isPlaying = uiState.isPlaying,
+                    isClockSynced = uiState.clockSync.isSynced,
+                    leadInRemainingMs = leadInRemainingMs,
+                    onTapTempo = onTapTempo,
+                    onTogglePlayStop = onTogglePlayStop
                 )
             }
-        },
-        topBar = {
-            StageTopBar(
-                uiState = uiState,
-                onOpenRoomSheet = onOpenRoomSheet,
-                onOpenSettings = onOpenSettings
-            )
-        },
-        bottomBar = {
-            PerformanceDock(
-                isInRoom = uiState.isInRoom,
-                isPlaying = uiState.isPlaying,
-                isClockSynced = uiState.clockSync.isSynced,
-                leadInRemainingMs = leadInRemainingMs,
-                onTapTempo = onTapTempo,
-                onTogglePlayStop = onTogglePlayStop
-            )
-        }
-    ) { innerPadding ->
+        ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -377,16 +394,27 @@ fun MetronomeScreen(
         )
     }
 
-    if (uiState.showRoomSheet) {
+    if (uiState.showRoomSheet && !uiState.showQrScanner) {
         RoomConnectionSheet(
             serverUrl = uiState.serverUrl,
+            hasExplicitSavedServer = uiState.hasExplicitSavedServer,
+            discoveredServers = uiState.discoveredServers,
+            isDiscoveringServers = uiState.isDiscoveringServers,
+            isServerEditorExpanded = uiState.isServerEditorExpanded,
             roomCodeInput = uiState.roomCodeInput,
             isConnecting = uiState.isConnectingAction,
             errorMessage = uiState.roomSheetError,
-            onServerUrlChanged = onServerUrlChanged,
+            cameraPermissionDeniedHint = uiState.cameraPermissionDeniedHint,
+            onToggleServerEditor = onToggleServerEditor,
+            onRescanServers = onRescanServers,
+            onSelectDiscoveredServer = onSelectDiscoveredServer,
+            onApplyManualServerAddress = onApplyManualServerAddress,
             onRoomCodeChanged = onRoomCodeChanged,
             onCreateRoom = onCreateRoom,
             onJoinRoom = onJoinRoom,
+            onOpenQrScanner = onOpenQrScanner,
+            onCameraPermissionDenied = onCameraPermissionDenied,
+            onDismissCameraPermissionHint = onDismissCameraPermissionHint,
             onDismiss = onDismissRoomSheet,
             activeRoom = uiState.activeRoom,
             onCopyRoomCode = { code ->
@@ -394,8 +422,32 @@ fun MetronomeScreen(
                 cm.setPrimaryClip(ClipData.newPlainText("Room Code", code))
                 onShowSnackbar("Room code $code copied")
             },
+            onOpenShareQr = onOpenShareQr,
             onLeaveRoom = onLeaveRoom
         )
+    }
+
+    val activeRoomForQr = uiState.activeRoom
+    if (uiState.showShareQrSheet && activeRoomForQr != null) {
+        ShareRoomQrSheet(
+            roomCode = activeRoomForQr.roomCode,
+            serverUrl = uiState.serverUrl,
+            onCopyRoomCode = { code ->
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Room Code", code))
+                onShowSnackbar("Room code $code copied")
+            },
+            onDismiss = onDismissShareQr
+        )
+    }
+
+    if (uiState.showQrScanner) {
+        QrScannerOverlay(
+            onRoomInviteScanned = onQrRoomInviteScanned,
+            onServerUrlScanned = onQrServerUrlScanned,
+            onClose = onCloseQrScanner
+        )
+    }
     }
 }
 
@@ -403,6 +455,7 @@ fun MetronomeScreen(
 private fun StageTopBar(
     uiState: AppUiState,
     onOpenRoomSheet: () -> Unit,
+    onOpenShareQr: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val room = uiState.activeRoom
@@ -414,83 +467,105 @@ private fun StageTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = SurfaceTonal,
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .clickable(onClick = onOpenRoomSheet)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (room == null) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(StatusEmerald)
-                    )
-                    Text(
-                        text = "Solo",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextPrimary
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.Sync,
-                        contentDescription = "Open sync room",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-            } else {
-                val dotColor = when (uiState.syncQuality) {
-                    SyncQuality.GOOD -> StatusEmerald
-                    SyncQuality.FAIR,
-                    SyncQuality.SYNCING -> StatusAmber
-                    SyncQuality.POOR,
-                    SyncQuality.OFFLINE -> StatusCoral
-                }
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(dotColor)
-                    )
-                    Text(
-                        text = room.roomCode,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.5.sp,
-                        color = StudioAmber
-                    )
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = SurfaceTonal,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onOpenRoomSheet)
+            ) {
+                if (room == null) {
                     Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Group,
-                            contentDescription = "Peers",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(14.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(StatusEmerald)
                         )
                         Text(
-                            text = "${room.participantCount}",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
+                            text = "Solo",
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = TextSecondary
+                            color = TextPrimary
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = "Open sync room",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(15.dp)
                         )
                     }
+                } else {
+                    val dotColor = when (uiState.syncQuality) {
+                        SyncQuality.GOOD -> StatusEmerald
+                        SyncQuality.FAIR,
+                        SyncQuality.SYNCING -> StatusAmber
+                        SyncQuality.POOR,
+                        SyncQuality.OFFLINE -> StatusCoral
+                    }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(dotColor)
+                        )
+                        Text(
+                            text = room.roomCode,
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.5.sp,
+                            color = StudioAmber
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Group,
+                                contentDescription = "Peers",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "${room.participantCount}",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (room != null) {
+                IconButton(
+                    onClick = onOpenShareQr,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(SurfaceTonal)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.QrCode2,
+                        contentDescription = "Share room QR code",
+                        tint = StudioAmber,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }

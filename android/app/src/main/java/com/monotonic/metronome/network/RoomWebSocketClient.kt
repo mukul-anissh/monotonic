@@ -22,7 +22,6 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import java.net.URI
 import java.util.concurrent.TimeUnit
 
 class RoomWebSocketClient(
@@ -51,7 +50,11 @@ class RoomWebSocketClient(
     private var pendingOnOpen: (() -> Unit)? = null
 
     fun connectAndExecute(rawUrl: String, action: () -> Unit) {
-        val normalized = normalizeWebSocketUrl(rawUrl)
+        val normalized = ServerUrlNormalizer.normalize(rawUrl)
+        if (normalized == null) {
+            onConnectionStatusChanged(ConnectionStatus.DISCONNECTED, "Invalid server URL")
+            return
+        }
         synchronized(socketLock) {
             if (activeSocket != null && activeUrl == normalized && isOpen) {
                 action()
@@ -230,28 +233,7 @@ class RoomWebSocketClient(
 
     companion object {
         fun normalizeWebSocketUrl(raw: String): String {
-            var trimmed = raw.trim()
-            if (trimmed.startsWith("http://", ignoreCase = true)) {
-                trimmed = "ws://" + trimmed.substring(7)
-            } else if (trimmed.startsWith("https://", ignoreCase = true)) {
-                trimmed = "wss://" + trimmed.substring(8)
-            } else if (!trimmed.startsWith("ws://", ignoreCase = true) &&
-                !trimmed.startsWith("wss://", ignoreCase = true)
-            ) {
-                trimmed = "ws://$trimmed"
-            }
-
-            return try {
-                val uri = URI(trimmed)
-                if (uri.path.isNullOrEmpty() || uri.path == "/") {
-                    val base = trimmed.trimEnd('/')
-                    "$base/ws"
-                } else {
-                    trimmed
-                }
-            } catch (_: Exception) {
-                trimmed
-            }
+            return ServerUrlNormalizer.normalize(raw) ?: raw.trim()
         }
     }
 }

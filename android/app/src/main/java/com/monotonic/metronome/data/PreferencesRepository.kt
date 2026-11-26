@@ -19,6 +19,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 data class UserPreferencesSnapshot(
     val serverUrl: String = PreferencesRepository.DEFAULT_SERVER_URL,
+    val hasSavedServerUrl: Boolean = false,
     val manualOffsetMs: Int = 0,
     val masterVolume: Float = PreferencesRepository.DEFAULT_MASTER_VOLUME,
     val clickSound: ClickSoundOption = ClickSoundOption.CLASSIC,
@@ -52,6 +53,7 @@ class PreferencesRepository(private val context: Context) {
         val rawSub = prefs[KEY_SOLO_SUBDIVISION] ?: 1
         UserPreferencesSnapshot(
             serverUrl = prefs[KEY_SERVER_URL] ?: DEFAULT_SERVER_URL,
+            hasSavedServerUrl = prefs.contains(KEY_SERVER_URL),
             manualOffsetMs = (prefs[KEY_MANUAL_OFFSET_MS] ?: 0)
                 .coerceIn(MIN_MANUAL_OFFSET_MS, MAX_MANUAL_OFFSET_MS),
             masterVolume = (prefs[KEY_MASTER_VOLUME] ?: DEFAULT_MASTER_VOLUME).coerceIn(0f, 1f),

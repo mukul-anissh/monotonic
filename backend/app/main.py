@@ -1,10 +1,13 @@
 """FastAPI WebSocket server for Monotonic clock sync and transport state."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import json
 from typing import Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .clock import ClockFn, default_clock
+from .mdns import MdnsAdvertiser
 from .rooms import RoomManager
 
 
@@ -18,7 +21,18 @@ def _is_strict_int(value: Any) -> bool:
 
 def create_app(clock_fn: ClockFn = default_clock) -> FastAPI:
     """Create the FastAPI application wired with an injectable monotonic clock."""
-    application = FastAPI(title="Monotonic Sync Server", version="0.1.0")
+    advertiser = MdnsAdvertiser()
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        application.state.mdns_config = await advertiser.start()
+        try:
+            yield
+        finally:
+            await advertiser.stop()
+            application.state.mdns_config = None
+
+    application = FastAPI(title="Monotonic Sync Server", version="0.1.0", lifespan=lifespan)
     manager = RoomManager(clock_fn=clock_fn)
     application.state.room_manager = manager
 

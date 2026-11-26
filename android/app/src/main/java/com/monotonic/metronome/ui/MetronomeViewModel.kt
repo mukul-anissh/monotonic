@@ -12,9 +12,13 @@ import com.monotonic.metronome.model.AppUiState
 import com.monotonic.metronome.model.AudioDiagnostics
 import com.monotonic.metronome.model.ClickSoundOption
 import com.monotonic.metronome.model.ConnectionStatus
+import com.monotonic.metronome.model.DiscoveredServer
 import com.monotonic.metronome.model.RoomSnapshot
 import com.monotonic.metronome.model.RoomStateEvent
 import com.monotonic.metronome.network.RoomWebSocketClient
+import com.monotonic.metronome.network.ServerDiscoveryManager
+import com.monotonic.metronome.network.ServerSelectionPolicy
+import com.monotonic.metronome.network.ServerUrlNormalizer
 import com.monotonic.metronome.sync.ClockSyncManager
 import com.monotonic.metronome.sync.ClockSyncMath
 import com.monotonic.metronome.sync.MonotonicClock
@@ -37,9 +41,13 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val clock: MonotonicClock = SystemNanoTimeClock
     private val preferences = PreferencesRepository(application)
     private val nativeEngine = NativeMetronomeEngine()
+    private val serverDiscoveryManager = ServerDiscoveryManager(application)
 
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
+
+    @Volatile
+    private var userManuallyPickedInSession: Boolean = false
 
     private data class ScheduleIdentity(
         val isInRoom: Boolean,
@@ -129,8 +137,10 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
                     beatsPerBar = prefs.soloBeatsPerBar,
                     subdivision = prefs.soloSubdivision
                 )
+                val normalizedSavedUrl = ServerUrlNormalizer.normalize(prefs.serverUrl) ?: prefs.serverUrl
                 state.copy(
-                    serverUrl = prefs.serverUrl,
+                    serverUrl = normalizedSavedUrl,
+                    hasExplicitSavedServer = prefs.hasSavedServerUrl,
                     manualOffsetMs = prefs.manualOffsetMs,
                     masterVolume = prefs.masterVolume,
                     clickSound = prefs.clickSound,
@@ -139,6 +149,39 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
                     soloState = updatedSolo,
                     accentLevels = adaptedAccents
                 )
+            }
+        }
+
+        viewModelScope.launch {
+            serverDiscoveryManager.servers.collect { discovered ->
+                var autoSelectedUrl: String? = null
+                _uiState.update { state ->
+                    val outcome = ServerSelectionPolicy.evaluate(
+                        discovered = discovered,
+                        currentServerUrl = state.serverUrl,
+                        hasExplicitSavedServer = state.hasExplicitSavedServer,
+                        isEditorExpanded = state.isServerEditorExpanded,
+                        userManuallyPickedInSession = userManuallyPickedInSession,
+                        isInRoom = state.isInRoom
+                    )
+                    if (outcome.autoSelected) {
+                        autoSelectedUrl = outcome.serverUrl
+                    }
+                    state.copy(
+                        discoveredServers = discovered,
+                        serverUrl = outcome.serverUrl,
+                        activeServerName = outcome.activeServerName
+                    )
+                }
+                autoSelectedUrl?.let { selected ->
+                    preferences.saveServerUrl(selected)
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            serverDiscoveryManager.isScanning.collect { scanning ->
+                _uiState.update { it.copy(isDiscoveringServers = scanning) }
             }
         }
 
@@ -158,12 +201,181 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun openRoomSheet() {
-        _uiState.update { it.copy(showRoomSheet = true, roomSheetError = null) }
+        userManuallyPickedInSession = false
+        _uiState.update {
+            it.copy(
+                showRoomSheet = true,
+                isServerEditorExpanded = false,
+                roomSheetError = null,
+                cameraPermissionDeniedHint = false
+            )
+        }
+        serverDiscoveryManager.startDiscovery()
     }
 
     fun dismissRoomSheet() {
+        serverDiscoveryManager.stopDiscovery()
         _uiState.update {
-            it.copy(showRoomSheet = false, isConnectingAction = false, roomSheetError = null)
+            it.copy(
+                showRoomSheet = false,
+                isConnectingAction = false,
+                isServerEditorExpanded = false,
+                roomSheetError = null,
+                cameraPermissionDeniedHint = false
+            )
+        }
+    }
+
+    fun onAppBackgrounded() {
+        serverDiscoveryManager.stopDiscovery()
+    }
+
+    fun onAppForegrounded() {
+        val state = _uiState.value
+        if (state.showRoomSheet && !state.showQrScanner) {
+            serverDiscoveryManager.startDiscovery()
+        }
+    }
+
+    fun rescanLocalServers() {
+        serverDiscoveryManager.rescan()
+    }
+
+    fun toggleServerEditorExpanded() {
+        _uiState.update { it.copy(isServerEditorExpanded = !it.isServerEditorExpanded) }
+    }
+
+    fun selectDiscoveredServer(server: DiscoveredServer) {
+        userManuallyPickedInSession = true
+        _uiState.update {
+            it.copy(
+                serverUrl = server.wsUrl,
+                activeServerName = server.name,
+                hasExplicitSavedServer = true,
+                isServerEditorExpanded = false,
+                roomSheetError = null
+            )
+        }
+        viewModelScope.launch {
+            preferences.saveServerUrl(server.wsUrl)
+        }
+    }
+
+    fun applyManualServerAddress(rawInput: String): String? {
+        val normalized = ServerUrlNormalizer.normalize(rawInput)
+            ?: return "Enter a valid IP, host:port, or domain"
+        userManuallyPickedInSession = true
+        val matchedName = _uiState.value.discoveredServers
+            .firstOrNull { it.wsUrl.equals(normalized, ignoreCase = true) }
+            ?.name
+        _uiState.update {
+            it.copy(
+                serverUrl = normalized,
+                activeServerName = matchedName,
+                hasExplicitSavedServer = true,
+                isServerEditorExpanded = false,
+                roomSheetError = null
+            )
+        }
+        viewModelScope.launch {
+            preferences.saveServerUrl(normalized)
+        }
+        return null
+    }
+
+    fun openShareQrSheet() {
+        if (!_uiState.value.isInRoom) return
+        serverDiscoveryManager.stopDiscovery()
+        _uiState.update {
+            it.copy(
+                showRoomSheet = false,
+                showShareQrSheet = true,
+                isServerEditorExpanded = false
+            )
+        }
+    }
+
+    fun dismissShareQrSheet() {
+        _uiState.update { it.copy(showShareQrSheet = false) }
+    }
+
+    fun openQrScanner() {
+        serverDiscoveryManager.stopDiscovery()
+        _uiState.update {
+            it.copy(
+                showQrScanner = true,
+                cameraPermissionDeniedHint = false,
+                roomSheetError = null
+            )
+        }
+    }
+
+    fun closeQrScanner() {
+        _uiState.update { it.copy(showQrScanner = false) }
+        if (_uiState.value.showRoomSheet) {
+            serverDiscoveryManager.startDiscovery()
+        }
+    }
+
+    fun onCameraPermissionDenied() {
+        _uiState.update { it.copy(cameraPermissionDeniedHint = true) }
+    }
+
+    fun dismissCameraPermissionDeniedHint() {
+        _uiState.update { it.copy(cameraPermissionDeniedHint = false) }
+    }
+
+    fun onQrRoomInviteScanned(serverUrl: String, roomCode: String) {
+        val normalized = ServerUrlNormalizer.normalize(serverUrl) ?: return
+        val cleanCode = roomCode.trim().uppercase()
+        if (cleanCode.length != 6) return
+        userManuallyPickedInSession = true
+        val matchedName = _uiState.value.discoveredServers
+            .firstOrNull { it.wsUrl.equals(normalized, ignoreCase = true) }
+            ?.name
+        _uiState.update {
+            it.copy(
+                showQrScanner = false,
+                serverUrl = normalized,
+                activeServerName = matchedName,
+                hasExplicitSavedServer = true,
+                roomCodeInput = cleanCode,
+                isServerEditorExpanded = false,
+                isConnectingAction = true,
+                roomSheetError = null,
+                cameraPermissionDeniedHint = false
+            )
+        }
+        viewModelScope.launch {
+            preferences.saveServerUrl(normalized)
+        }
+        webSocketClient.connectAndExecute(normalized) {
+            webSocketClient.joinRoom(cleanCode)
+        }
+    }
+
+    fun onQrServerUrlScanned(serverUrl: String) {
+        val normalized = ServerUrlNormalizer.normalize(serverUrl) ?: return
+        userManuallyPickedInSession = true
+        val matchedName = _uiState.value.discoveredServers
+            .firstOrNull { it.wsUrl.equals(normalized, ignoreCase = true) }
+            ?.name
+        _uiState.update {
+            it.copy(
+                showQrScanner = false,
+                serverUrl = normalized,
+                activeServerName = matchedName,
+                hasExplicitSavedServer = true,
+                isServerEditorExpanded = false,
+                roomSheetError = null,
+                snackbarMessage = "Server set to ${ServerUrlNormalizer.extractHostDisplay(normalized)}"
+            )
+        }
+        viewModelScope.launch {
+            preferences.saveServerUrl(normalized)
+        }
+        if (_uiState.value.showRoomSheet) {
+            serverDiscoveryManager.startDiscovery()
         }
     }
 
@@ -183,38 +395,50 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update { it.copy(snackbarMessage = message) }
     }
 
-    fun onServerUrlChanged(url: String) {
-        _uiState.update { it.copy(serverUrl = url, roomSheetError = null) }
-        viewModelScope.launch {
-            preferences.saveServerUrl(url)
-        }
-    }
-
     fun onRoomCodeInputChanged(code: String) {
         _uiState.update { it.copy(roomCodeInput = code, roomSheetError = null) }
     }
 
     fun createRoom() {
-        val url = _uiState.value.serverUrl.trim()
-        if (url.isEmpty()) return
-        viewModelScope.launch {
-            preferences.saveServerUrl(url)
+        val normalized = ServerUrlNormalizer.normalize(_uiState.value.serverUrl)
+        if (normalized == null) {
+            _uiState.update { it.copy(roomSheetError = "Invalid server address") }
+            return
         }
-        _uiState.update { it.copy(isConnectingAction = true, roomSheetError = null) }
-        webSocketClient.connectAndExecute(url) {
+        viewModelScope.launch {
+            preferences.saveServerUrl(normalized)
+        }
+        _uiState.update {
+            it.copy(
+                serverUrl = normalized,
+                isConnectingAction = true,
+                roomSheetError = null
+            )
+        }
+        webSocketClient.connectAndExecute(normalized) {
             webSocketClient.createRoom()
         }
     }
 
     fun joinRoom() {
-        val url = _uiState.value.serverUrl.trim()
-        val code = _uiState.value.roomCodeInput.trim().uppercase()
-        if (url.isEmpty() || code.length != 6) return
-        viewModelScope.launch {
-            preferences.saveServerUrl(url)
+        val normalized = ServerUrlNormalizer.normalize(_uiState.value.serverUrl)
+        if (normalized == null) {
+            _uiState.update { it.copy(roomSheetError = "Invalid server address") }
+            return
         }
-        _uiState.update { it.copy(isConnectingAction = true, roomSheetError = null) }
-        webSocketClient.connectAndExecute(url) {
+        val code = _uiState.value.roomCodeInput.trim().uppercase()
+        if (code.length != 6) return
+        viewModelScope.launch {
+            preferences.saveServerUrl(normalized)
+        }
+        _uiState.update {
+            it.copy(
+                serverUrl = normalized,
+                isConnectingAction = true,
+                roomSheetError = null
+            )
+        }
+        webSocketClient.connectAndExecute(normalized) {
             webSocketClient.joinRoom(code)
         }
     }
@@ -445,6 +669,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     fun readBeatSequence(): Long = nativeEngine.getBeatSequence()
 
     private fun handleRoomJoined(event: RoomStateEvent) {
+        serverDiscoveryManager.stopDiscovery()
         val snapshot = event.toSnapshot()
         var adaptedAccents: List<Int> = emptyList()
 
@@ -456,6 +681,9 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
                 activeRoom = snapshot,
                 accentLevels = adaptedAccents,
                 showRoomSheet = false,
+                showQrScanner = false,
+                isServerEditorExpanded = false,
+                cameraPermissionDeniedHint = false,
                 isConnectingAction = false,
                 roomSheetError = null,
                 snackbarMessage = "Connected to room ${snapshot.roomCode}"
@@ -541,6 +769,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
             state.copy(
                 soloState = nextSolo,
                 activeRoom = null,
+                showShareQrSheet = false,
                 isConnectingAction = false,
                 roomSheetError = null,
                 snackbarMessage = snackbarMessage,
@@ -653,6 +882,7 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         super.onCleared()
         diagnosticsJob?.cancel()
+        serverDiscoveryManager.destroy()
         clockSyncManager.stop(resetOffset = true)
         audioRouteMonitor.stop()
         audioFocusController.abandonFocus()

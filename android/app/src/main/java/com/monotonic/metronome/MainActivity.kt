@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
                             onVisualBeatFlashChanged = viewModel::onVisualBeatFlashChanged,
                             onManualOffsetChanged = viewModel::onManualOffsetChanged,
                             onResyncNow = viewModel::resyncNow,
-                            onServerUrlChanged = viewModel::onServerUrlChanged,
+                            onApplyManualServerAddress = viewModel::applyManualServerAddress,
                             onLeaveRoom = viewModel::leaveRoom,
                             onOpenRoomSheetFromSettings = {
                                 viewModel.closeSettings()
@@ -75,10 +75,21 @@ class MainActivity : ComponentActivity() {
                             onOpenRoomSheet = viewModel::openRoomSheet,
                             onDismissRoomSheet = viewModel::dismissRoomSheet,
                             onOpenSettings = viewModel::openSettings,
-                            onServerUrlChanged = viewModel::onServerUrlChanged,
+                            onToggleServerEditor = viewModel::toggleServerEditorExpanded,
+                            onRescanServers = viewModel::rescanLocalServers,
+                            onSelectDiscoveredServer = viewModel::selectDiscoveredServer,
+                            onApplyManualServerAddress = viewModel::applyManualServerAddress,
                             onRoomCodeChanged = viewModel::onRoomCodeInputChanged,
                             onCreateRoom = viewModel::createRoom,
                             onJoinRoom = viewModel::joinRoom,
+                            onOpenShareQr = viewModel::openShareQrSheet,
+                            onDismissShareQr = viewModel::dismissShareQrSheet,
+                            onOpenQrScanner = viewModel::openQrScanner,
+                            onCloseQrScanner = viewModel::closeQrScanner,
+                            onCameraPermissionDenied = viewModel::onCameraPermissionDenied,
+                            onDismissCameraPermissionHint = viewModel::dismissCameraPermissionDeniedHint,
+                            onQrRoomInviteScanned = viewModel::onQrRoomInviteScanned,
+                            onQrServerUrlScanned = viewModel::onQrServerUrlScanned,
                             onLeaveRoom = viewModel::leaveRoom,
                             onShowSnackbar = viewModel::showSnackbar,
                             onConsumeSnackbar = viewModel::consumeSnackbar
@@ -87,5 +98,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        viewModel.onAppForegrounded()
+    }
+
+    override fun onStop() {
+        viewModel.onAppBackgrounded()
+        super.onStop()
     }
 }

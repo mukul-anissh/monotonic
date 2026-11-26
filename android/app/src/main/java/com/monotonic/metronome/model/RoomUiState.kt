@@ -77,6 +77,23 @@ data class AudioDiagnostics(
     val audioApiName: String = "Auto"
 )
 
+data class DiscoveredServer(
+    val name: String,
+    val host: String,
+    val port: Int,
+    val path: String = "/ws",
+    val serviceName: String = name
+) {
+    val hostPortKey: String
+        get() = "$host:$port"
+
+    val wsUrl: String
+        get() {
+            val cleanPath = if (path.startsWith("/")) path else "/$path"
+            return "ws://$host:$port$cleanPath"
+        }
+}
+
 data class AppUiState(
     val soloState: SoloTransportState = SoloTransportState(),
     val activeRoom: RoomSnapshot? = null,
@@ -87,11 +104,19 @@ data class AppUiState(
     val visualBeatFlash: Boolean = true,
     val manualOffsetMs: Int = 0,
     val serverUrl: String = "ws://192.168.1.100:8000/ws",
+    val hasExplicitSavedServer: Boolean = false,
+    val discoveredServers: List<DiscoveredServer> = emptyList(),
+    val isDiscoveringServers: Boolean = false,
+    val activeServerName: String? = null,
+    val isServerEditorExpanded: Boolean = false,
     val roomCodeInput: String = "",
     val connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED,
     val isConnectingAction: Boolean = false,
     val roomSheetError: String? = null,
     val showRoomSheet: Boolean = false,
+    val showShareQrSheet: Boolean = false,
+    val showQrScanner: Boolean = false,
+    val cameraPermissionDeniedHint: Boolean = false,
     val showSettings: Boolean = false,
     val snackbarMessage: String? = null,
     val clockSync: ClockSyncState = ClockSyncState(),
