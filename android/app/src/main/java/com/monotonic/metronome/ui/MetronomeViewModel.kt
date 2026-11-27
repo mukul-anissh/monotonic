@@ -3,235 +3,57 @@ package com.monotonic.metronome.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.monotonic.metronome.audio.AccentPattern
-import com.monotonic.metronome.audio.AudioFocusController
-import com.monotonic.metronome.audio.AudioRouteMonitor
-import com.monotonic.metronome.audio.NativeMetronomeEngine
-import com.monotonic.metronome.data.PreferencesRepository
+import com.monotonic.metronome.MonotonicApplication
 import com.monotonic.metronome.model.AppUiState
-import com.monotonic.metronome.model.AudioDiagnostics
 import com.monotonic.metronome.model.ClickSoundOption
-import com.monotonic.metronome.model.ConnectionStatus
 import com.monotonic.metronome.model.DiscoveredServer
-import com.monotonic.metronome.model.RoomSnapshot
-import com.monotonic.metronome.model.RoomStateEvent
-import com.monotonic.metronome.network.RoomWebSocketClient
 import com.monotonic.metronome.network.ServerDiscoveryManager
-import com.monotonic.metronome.network.ServerSelectionPolicy
-import com.monotonic.metronome.network.ServerUrlNormalizer
-import com.monotonic.metronome.sync.ClockSyncManager
-import com.monotonic.metronome.sync.ClockSyncMath
-import com.monotonic.metronome.sync.MonotonicClock
-import com.monotonic.metronome.sync.SoloScheduler
-import com.monotonic.metronome.sync.SystemNanoTimeClock
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
+/**
+ * UI-facing ViewModel bridging Activity lifecycle and foreground LAN mDNS scanning
+ * to the Application-scoped [com.monotonic.metronome.session.MetronomeSessionController].
+ */
 class MetronomeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val clock: MonotonicClock = SystemNanoTimeClock
-    private val preferences = PreferencesRepository(application)
-    private val nativeEngine = NativeMetronomeEngine()
+    private val sessionController = MonotonicApplication.from(application).sessionController
     private val serverDiscoveryManager = ServerDiscoveryManager(application)
 
-    private val _uiState = MutableStateFlow(AppUiState())
-    val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
-
-    @Volatile
-    private var userManuallyPickedInSession: Boolean = false
-
-    private data class ScheduleIdentity(
-        val isInRoom: Boolean,
-        val sourceVersion: Long,
-        val shouldPlay: Boolean,
-        val localSubdivision: Int
-    )
-
-    private val transportLock = Any()
-    private var engineScheduleVersion: Long = 1L
-    private var lastScheduleIdentity: ScheduleIdentity? = null
-    private var wasEnginePlaying: Boolean = false
-
-    @Volatile
-    private var currentFocusGain: Float = AudioFocusController.GAIN_FULL
-
-    private val tapTimestampsNs = ArrayDeque<Long>()
-    private var lastRoomNudgeNs: Long = 0L
-    private var lastRoomNudgeBpm: Double = 120.0
-    private var diagnosticsJob: Job? = null
-
-    private lateinit var webSocketClient: RoomWebSocketClient
-
-    private val clockSyncManager = ClockSyncManager(
-        clock = clock,
-        sendPing = { seq, t1 -> webSocketClient.sendSyncPing(seq, t1) }
-    )
-
-    private val audioRouteMonitor = AudioRouteMonitor(application) {
-        viewModelScope.launch(Dispatchers.IO) {
-            nativeEngine.restartStream()
-            refreshAudioDiagnostics()
-        }
-    }
-
-    private val audioFocusController = AudioFocusController(application) { gain ->
-        currentFocusGain = gain
-        synchronized(transportLock) {
-            pushSnapshotToNativeLocked(_uiState.value)
-        }
-    }
+    val uiState: StateFlow<AppUiState> = sessionController.uiState
 
     init {
-        webSocketClient = RoomWebSocketClient(
-            clock = clock,
-            onSyncPong = { seq, t1, t2, t3, t4 ->
-                clockSyncManager.onSyncPong(seq, t1, t2, t3, t4)
-            },
-            onRoomJoined = { event ->
-                handleRoomJoined(event)
-            },
-            onRoomState = { event ->
-                handleRoomState(event)
-            },
-            onServerError = { err ->
-                _uiState.update {
-                    it.copy(
-                        isConnectingAction = false,
-                        roomSheetError = if (it.showRoomSheet) err.message else it.roomSheetError,
-                        snackbarMessage = if (!it.showRoomSheet) err.message else it.snackbarMessage
-                    )
-                }
-            },
-            onConnectionStatusChanged = { status, errMsg ->
-                handleConnectionChanged(status, errMsg)
-            }
-        )
-
-        audioRouteMonitor.start()
-
-        // Keep native C++ Oboe stream open immediately so Solo Mode plays with zero startup lag
-        viewModelScope.launch(Dispatchers.IO) {
-            nativeEngine.startStream()
-            refreshAudioDiagnostics()
-        }
-        startDiagnosticsPolling()
-
-        viewModelScope.launch {
-            val prefs = preferences.preferencesFlow.first()
-            val adaptedAccents = AccentPattern.deserialize(prefs.accentPatternRaw, prefs.soloBeatsPerBar)
-            nativeEngine.setSoundProfile(prefs.clickSound.id)
-            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(adaptedAccents))
-
-            updateStateAndPushTransport { state ->
-                val updatedSolo = state.soloState.copy(
-                    bpm = prefs.soloBpm,
-                    beatsPerBar = prefs.soloBeatsPerBar,
-                    subdivision = prefs.soloSubdivision
-                )
-                val normalizedSavedUrl = ServerUrlNormalizer.normalize(prefs.serverUrl) ?: prefs.serverUrl
-                state.copy(
-                    serverUrl = normalizedSavedUrl,
-                    hasExplicitSavedServer = prefs.hasSavedServerUrl,
-                    manualOffsetMs = prefs.manualOffsetMs,
-                    masterVolume = prefs.masterVolume,
-                    clickSound = prefs.clickSound,
-                    visualBeatFlash = prefs.visualBeatFlash,
-                    localSubdivision = prefs.soloSubdivision,
-                    soloState = updatedSolo,
-                    accentLevels = adaptedAccents
-                )
-            }
-        }
-
         viewModelScope.launch {
             serverDiscoveryManager.servers.collect { discovered ->
-                var autoSelectedUrl: String? = null
-                _uiState.update { state ->
-                    val outcome = ServerSelectionPolicy.evaluate(
-                        discovered = discovered,
-                        currentServerUrl = state.serverUrl,
-                        hasExplicitSavedServer = state.hasExplicitSavedServer,
-                        isEditorExpanded = state.isServerEditorExpanded,
-                        userManuallyPickedInSession = userManuallyPickedInSession,
-                        isInRoom = state.isInRoom
-                    )
-                    if (outcome.autoSelected) {
-                        autoSelectedUrl = outcome.serverUrl
-                    }
-                    state.copy(
-                        discoveredServers = discovered,
-                        serverUrl = outcome.serverUrl,
-                        activeServerName = outcome.activeServerName
-                    )
-                }
-                autoSelectedUrl?.let { selected ->
-                    preferences.saveServerUrl(selected)
-                }
+                sessionController.updateDiscoveredServers(discovered)
             }
         }
 
         viewModelScope.launch {
             serverDiscoveryManager.isScanning.collect { scanning ->
-                _uiState.update { it.copy(isDiscoveringServers = scanning) }
-            }
-        }
-
-        viewModelScope.launch {
-            clockSyncManager.state.collect { syncState ->
-                updateStateAndPushTransport { state ->
-                    state.copy(clockSync = syncState)
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            audioRouteMonitor.state.collect { routeState ->
-                _uiState.update { it.copy(audioRoute = routeState) }
+                sessionController.setDiscoveringServers(scanning)
             }
         }
     }
 
     fun openRoomSheet() {
-        userManuallyPickedInSession = false
-        _uiState.update {
-            it.copy(
-                showRoomSheet = true,
-                isServerEditorExpanded = false,
-                roomSheetError = null,
-                cameraPermissionDeniedHint = false
-            )
-        }
+        sessionController.openRoomSheetState()
         serverDiscoveryManager.startDiscovery()
     }
 
     fun dismissRoomSheet() {
         serverDiscoveryManager.stopDiscovery()
-        _uiState.update {
-            it.copy(
-                showRoomSheet = false,
-                isConnectingAction = false,
-                isServerEditorExpanded = false,
-                roomSheetError = null,
-                cameraPermissionDeniedHint = false
-            )
-        }
+        sessionController.dismissRoomSheetState()
     }
 
     fun onAppBackgrounded() {
+        sessionController.onUiForegroundChanged(false)
         serverDiscoveryManager.stopDiscovery()
     }
 
     fun onAppForegrounded() {
-        val state = _uiState.value
+        sessionController.onUiForegroundChanged(true)
+        val state = uiState.value
         if (state.showRoomSheet && !state.showQrScanner) {
             serverDiscoveryManager.startDiscovery()
         }
@@ -241,653 +63,97 @@ class MetronomeViewModel(application: Application) : AndroidViewModel(applicatio
         serverDiscoveryManager.rescan()
     }
 
-    fun toggleServerEditorExpanded() {
-        _uiState.update { it.copy(isServerEditorExpanded = !it.isServerEditorExpanded) }
-    }
+    fun toggleServerEditorExpanded() = sessionController.toggleServerEditorExpanded()
 
-    fun selectDiscoveredServer(server: DiscoveredServer) {
-        userManuallyPickedInSession = true
-        _uiState.update {
-            it.copy(
-                serverUrl = server.wsUrl,
-                activeServerName = server.name,
-                hasExplicitSavedServer = true,
-                isServerEditorExpanded = false,
-                roomSheetError = null
-            )
-        }
-        viewModelScope.launch {
-            preferences.saveServerUrl(server.wsUrl)
-        }
-    }
+    fun selectDiscoveredServer(server: DiscoveredServer) =
+        sessionController.selectDiscoveredServer(server)
 
-    fun applyManualServerAddress(rawInput: String): String? {
-        val normalized = ServerUrlNormalizer.normalize(rawInput)
-            ?: return "Enter a valid IP, host:port, or domain"
-        userManuallyPickedInSession = true
-        val matchedName = _uiState.value.discoveredServers
-            .firstOrNull { it.wsUrl.equals(normalized, ignoreCase = true) }
-            ?.name
-        _uiState.update {
-            it.copy(
-                serverUrl = normalized,
-                activeServerName = matchedName,
-                hasExplicitSavedServer = true,
-                isServerEditorExpanded = false,
-                roomSheetError = null
-            )
-        }
-        viewModelScope.launch {
-            preferences.saveServerUrl(normalized)
-        }
-        return null
-    }
+    fun applyManualServerAddress(rawInput: String): String? =
+        sessionController.applyManualServerAddress(rawInput)
 
     fun openShareQrSheet() {
-        if (!_uiState.value.isInRoom) return
-        serverDiscoveryManager.stopDiscovery()
-        _uiState.update {
-            it.copy(
-                showRoomSheet = false,
-                showShareQrSheet = true,
-                isServerEditorExpanded = false
-            )
+        if (sessionController.openShareQrSheet()) {
+            serverDiscoveryManager.stopDiscovery()
         }
     }
 
-    fun dismissShareQrSheet() {
-        _uiState.update { it.copy(showShareQrSheet = false) }
-    }
+    fun dismissShareQrSheet() = sessionController.dismissShareQrSheet()
 
     fun openQrScanner() {
         serverDiscoveryManager.stopDiscovery()
-        _uiState.update {
-            it.copy(
-                showQrScanner = true,
-                cameraPermissionDeniedHint = false,
-                roomSheetError = null
-            )
-        }
+        sessionController.openQrScanner()
     }
 
     fun closeQrScanner() {
-        _uiState.update { it.copy(showQrScanner = false) }
-        if (_uiState.value.showRoomSheet) {
+        if (sessionController.closeQrScanner()) {
             serverDiscoveryManager.startDiscovery()
         }
     }
 
-    fun onCameraPermissionDenied() {
-        _uiState.update { it.copy(cameraPermissionDeniedHint = true) }
-    }
+    fun onCameraPermissionDenied() = sessionController.onCameraPermissionDenied()
 
-    fun dismissCameraPermissionDeniedHint() {
-        _uiState.update { it.copy(cameraPermissionDeniedHint = false) }
-    }
+    fun dismissCameraPermissionDeniedHint() = sessionController.dismissCameraPermissionDeniedHint()
 
-    fun onQrRoomInviteScanned(serverUrl: String, roomCode: String) {
-        val normalized = ServerUrlNormalizer.normalize(serverUrl) ?: return
-        val cleanCode = roomCode.trim().uppercase()
-        if (cleanCode.length != 6) return
-        userManuallyPickedInSession = true
-        val matchedName = _uiState.value.discoveredServers
-            .firstOrNull { it.wsUrl.equals(normalized, ignoreCase = true) }
-            ?.name
-        _uiState.update {
-            it.copy(
-                showQrScanner = false,
-                serverUrl = normalized,
-                activeServerName = matchedName,
-                hasExplicitSavedServer = true,
-                roomCodeInput = cleanCode,
-                isServerEditorExpanded = false,
-                isConnectingAction = true,
-                roomSheetError = null,
-                cameraPermissionDeniedHint = false
-            )
-        }
-        viewModelScope.launch {
-            preferences.saveServerUrl(normalized)
-        }
-        webSocketClient.connectAndExecute(normalized) {
-            webSocketClient.joinRoom(cleanCode)
-        }
-    }
+    fun onQrRoomInviteScanned(serverUrl: String, roomCode: String) =
+        sessionController.onQrRoomInviteScanned(serverUrl, roomCode)
 
     fun onQrServerUrlScanned(serverUrl: String) {
-        val normalized = ServerUrlNormalizer.normalize(serverUrl) ?: return
-        userManuallyPickedInSession = true
-        val matchedName = _uiState.value.discoveredServers
-            .firstOrNull { it.wsUrl.equals(normalized, ignoreCase = true) }
-            ?.name
-        _uiState.update {
-            it.copy(
-                showQrScanner = false,
-                serverUrl = normalized,
-                activeServerName = matchedName,
-                hasExplicitSavedServer = true,
-                isServerEditorExpanded = false,
-                roomSheetError = null,
-                snackbarMessage = "Server set to ${ServerUrlNormalizer.extractHostDisplay(normalized)}"
-            )
-        }
-        viewModelScope.launch {
-            preferences.saveServerUrl(normalized)
-        }
-        if (_uiState.value.showRoomSheet) {
+        if (sessionController.onQrServerUrlScanned(serverUrl)) {
             serverDiscoveryManager.startDiscovery()
         }
     }
 
-    fun openSettings() {
-        _uiState.update { it.copy(showSettings = true) }
-    }
+    fun openSettings() = sessionController.openSettings()
 
-    fun closeSettings() {
-        _uiState.update { it.copy(showSettings = false) }
-    }
+    fun closeSettings() = sessionController.closeSettings()
 
-    fun consumeSnackbar() {
-        _uiState.update { it.copy(snackbarMessage = null) }
-    }
+    fun consumeSnackbar() = sessionController.consumeSnackbar()
 
-    fun showSnackbar(message: String) {
-        _uiState.update { it.copy(snackbarMessage = message) }
-    }
+    fun showSnackbar(message: String) = sessionController.showSnackbar(message)
 
-    fun onRoomCodeInputChanged(code: String) {
-        _uiState.update { it.copy(roomCodeInput = code, roomSheetError = null) }
-    }
+    fun onRoomCodeInputChanged(code: String) = sessionController.onRoomCodeInputChanged(code)
 
-    fun createRoom() {
-        val normalized = ServerUrlNormalizer.normalize(_uiState.value.serverUrl)
-        if (normalized == null) {
-            _uiState.update { it.copy(roomSheetError = "Invalid server address") }
-            return
-        }
-        viewModelScope.launch {
-            preferences.saveServerUrl(normalized)
-        }
-        _uiState.update {
-            it.copy(
-                serverUrl = normalized,
-                isConnectingAction = true,
-                roomSheetError = null
-            )
-        }
-        webSocketClient.connectAndExecute(normalized) {
-            webSocketClient.createRoom()
-        }
-    }
+    fun createRoom() = sessionController.createRoom()
 
-    fun joinRoom() {
-        val normalized = ServerUrlNormalizer.normalize(_uiState.value.serverUrl)
-        if (normalized == null) {
-            _uiState.update { it.copy(roomSheetError = "Invalid server address") }
-            return
-        }
-        val code = _uiState.value.roomCodeInput.trim().uppercase()
-        if (code.length != 6) return
-        viewModelScope.launch {
-            preferences.saveServerUrl(normalized)
-        }
-        _uiState.update {
-            it.copy(
-                serverUrl = normalized,
-                isConnectingAction = true,
-                roomSheetError = null
-            )
-        }
-        webSocketClient.connectAndExecute(normalized) {
-            webSocketClient.joinRoom(code)
-        }
-    }
+    fun joinRoom() = sessionController.joinRoom()
 
-    fun leaveRoom() {
-        if (!_uiState.value.isInRoom) return
-        webSocketClient.leaveRoom()
-        exitRoomToSoloMode(snackbarMessage = "Left room — Solo Mode")
-        webSocketClient.disconnect()
-    }
+    fun leaveRoom() = sessionController.leaveRoom()
 
-    fun togglePlayStop() {
-        val state = _uiState.value
-        val room = state.activeRoom
-        if (room != null) {
-            if (room.isPlaying) {
-                webSocketClient.stop()
-            } else {
-                webSocketClient.play()
-            }
-        } else {
-            val nowNs = clock.nanoTime()
-            updateStateAndPushTransport { prev ->
-                val nextSolo = if (prev.soloState.isPlaying) {
-                    SoloScheduler.stop(prev.soloState)
-                } else {
-                    SoloScheduler.play(prev.soloState, nowNs)
-                }
-                prev.copy(soloState = nextSolo)
-            }
-        }
-    }
+    fun togglePlayStop() = sessionController.togglePlayStop()
 
-    fun updateBpm(bpm: Double) {
-        val clamped = (bpm.coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM) * 100.0)
-            .roundToInt() / 100.0
-        val state = _uiState.value
-        if (state.isInRoom) {
-            lastRoomNudgeNs = clock.nanoTime()
-            lastRoomNudgeBpm = clamped
-            webSocketClient.updateTransport(bpm = clamped)
-        } else {
-            val nowNs = clock.nanoTime()
-            var savedBpm = clamped
-            var savedBpb = state.beatsPerBar
-            var savedSub = state.subdivision
-            updateStateAndPushTransport { prev ->
-                val nextSolo = SoloScheduler.updateTransport(
-                    state = prev.soloState,
-                    nowNs = nowNs,
-                    bpm = clamped
-                )
-                savedBpm = nextSolo.bpm
-                savedBpb = nextSolo.beatsPerBar
-                savedSub = nextSolo.subdivision
-                prev.copy(soloState = nextSolo)
-            }
-            viewModelScope.launch {
-                preferences.saveSoloTransport(savedBpm, savedBpb, savedSub)
-            }
-        }
-    }
+    fun updateBpm(bpm: Double) = sessionController.updateBpm(bpm)
 
-    fun nudgeBpm(delta: Double) {
-        val state = _uiState.value
-        val nowNs = clock.nanoTime()
-        val baseBpm = if (state.isInRoom && (nowNs - lastRoomNudgeNs) < 600_000_000L) {
-            lastRoomNudgeBpm
-        } else {
-            state.bpm
-        }
-        val target = (baseBpm + delta).roundToInt().toDouble()
-            .coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM)
-        updateBpm(target)
-    }
+    fun nudgeBpm(delta: Double) = sessionController.nudgeBpm(delta)
 
-    fun updateBeatsPerBar(beatsPerBar: Int) {
-        val clamped = beatsPerBar.coerceIn(
-            SoloScheduler.MIN_BEATS_PER_BAR,
-            SoloScheduler.MAX_BEATS_PER_BAR
-        )
-        val state = _uiState.value
-        if (state.isInRoom) {
-            webSocketClient.updateTransport(beatsPerBar = clamped)
-        } else {
-            val nowNs = clock.nanoTime()
-            var adaptedAccents: List<Int> = emptyList()
-            var savedBpm = state.bpm
-            var savedSub = state.subdivision
-            updateStateAndPushTransport { prev ->
-                val nextSolo = SoloScheduler.updateTransport(
-                    state = prev.soloState,
-                    nowNs = nowNs,
-                    beatsPerBar = clamped
-                )
-                adaptedAccents = AccentPattern.adaptPattern(prev.accentLevels, nextSolo.beatsPerBar)
-                savedBpm = nextSolo.bpm
-                savedSub = nextSolo.subdivision
-                prev.copy(soloState = nextSolo, accentLevels = adaptedAccents)
-            }
-            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(adaptedAccents))
-            viewModelScope.launch {
-                preferences.saveAccentPattern(adaptedAccents)
-                preferences.saveSoloTransport(savedBpm, clamped, savedSub)
-            }
-        }
-    }
+    fun updateBeatsPerBar(beatsPerBar: Int) = sessionController.updateBeatsPerBar(beatsPerBar)
 
-    fun updateSubdivision(subdivision: Int) {
-        if (subdivision !in SoloScheduler.VALID_SUBDIVISIONS) return
-        val nowNs = clock.nanoTime()
-        updateStateAndPushTransport { prev ->
-            if (prev.isInRoom) {
-                prev.copy(
-                    localSubdivision = subdivision,
-                    soloState = prev.soloState.copy(subdivision = subdivision)
-                )
-            } else {
-                val nextSolo = SoloScheduler.updateTransport(
-                    state = prev.soloState,
-                    nowNs = nowNs,
-                    subdivision = subdivision
-                )
-                prev.copy(
-                    localSubdivision = subdivision,
-                    soloState = nextSolo
-                )
-            }
-        }
-        viewModelScope.launch {
-            preferences.saveSubdivision(subdivision)
-        }
-    }
+    fun updateSubdivision(subdivision: Int) = sessionController.updateSubdivision(subdivision)
 
-    fun onTapTempo() {
-        val nowNs = clock.nanoTime()
-        val last = tapTimestampsNs.lastOrNull()
-        if (last != null && (nowNs - last) > 3_200_000_000L) {
-            tapTimestampsNs.clear()
-        }
-        tapTimestampsNs.addLast(nowNs)
-        while (tapTimestampsNs.size > 7) {
-            tapTimestampsNs.removeFirst()
-        }
-        if (tapTimestampsNs.size < 2) return
+    fun onTapTempo() = sessionController.onTapTempo()
 
-        var sumIntervalsNs = 0L
-        var count = 0
-        val list = tapTimestampsNs.toList()
-        for (i in 1 until list.size) {
-            val delta = list[i] - list[i - 1]
-            if (delta >= 100_000_000L) {
-                sumIntervalsNs += delta
-                count++
-            }
-        }
-        if (count == 0) return
+    fun cycleBeatAccent(beatIndex: Int) = sessionController.cycleBeatAccent(beatIndex)
 
-        val avgIntervalNs = sumIntervalsNs.toDouble() / count.toDouble()
-        val bpm = (60_000_000_000.0 / avgIntervalNs).roundToInt().toDouble()
-            .coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM)
-        updateBpm(bpm)
-    }
+    fun onMasterVolumeChanged(volume: Float) = sessionController.onMasterVolumeChanged(volume)
 
-    fun cycleBeatAccent(beatIndex: Int) {
-        var nextAccents: List<Int> = emptyList()
-        _uiState.update { prev ->
-            if (beatIndex < 0 || beatIndex >= prev.beatsPerBar) {
-                nextAccents = prev.accentLevels
-                return@update prev
-            }
-            val currentList = AccentPattern.adaptPattern(prev.accentLevels, prev.beatsPerBar)
-            val mutable = currentList.toMutableList()
-            mutable[beatIndex] = AccentPattern.cycleLevel(mutable[beatIndex])
-            nextAccents = mutable
-            prev.copy(accentLevels = nextAccents)
-        }
-        if (nextAccents.isNotEmpty()) {
-            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(nextAccents))
-            viewModelScope.launch {
-                preferences.saveAccentPattern(nextAccents)
-            }
-        }
-    }
+    fun onClickSoundSelected(option: ClickSoundOption) =
+        sessionController.onClickSoundSelected(option)
 
-    fun onMasterVolumeChanged(volume: Float) {
-        val clamped = volume.coerceIn(0f, 1f)
-        updateStateAndPushTransport { it.copy(masterVolume = clamped) }
-        viewModelScope.launch {
-            preferences.saveMasterVolume(clamped)
-        }
-    }
+    fun onVisualBeatFlashChanged(enabled: Boolean) =
+        sessionController.onVisualBeatFlashChanged(enabled)
 
-    fun onClickSoundSelected(option: ClickSoundOption) {
-        nativeEngine.setSoundProfile(option.id)
-        _uiState.update { it.copy(clickSound = option) }
-        viewModelScope.launch {
-            preferences.saveClickSound(option)
-        }
-    }
+    fun onManualOffsetChanged(offsetMs: Int) = sessionController.onManualOffsetChanged(offsetMs)
 
-    fun onVisualBeatFlashChanged(enabled: Boolean) {
-        _uiState.update { it.copy(visualBeatFlash = enabled) }
-        viewModelScope.launch {
-            preferences.saveVisualBeatFlash(enabled)
-        }
-    }
+    fun resyncNow() = sessionController.resyncNow()
 
-    fun onManualOffsetChanged(offsetMs: Int) {
-        val clamped = offsetMs.coerceIn(
-            PreferencesRepository.MIN_MANUAL_OFFSET_MS,
-            PreferencesRepository.MAX_MANUAL_OFFSET_MS
-        )
-        updateStateAndPushTransport { it.copy(manualOffsetMs = clamped) }
-        viewModelScope.launch {
-            preferences.saveManualOffsetMs(clamped)
-        }
-    }
+    fun readCurrentBeatIndex(): Int = sessionController.readCurrentBeatIndex()
 
-    fun resyncNow() {
-        if (_uiState.value.isInRoom) {
-            clockSyncManager.resyncNow(viewModelScope)
-        }
-    }
+    fun readBeatSequence(): Long = sessionController.readBeatSequence()
 
-    fun readCurrentBeatIndex(): Int = nativeEngine.getCurrentBeatIndex()
-
-    fun readBeatSequence(): Long = nativeEngine.getBeatSequence()
-
-    private fun handleRoomJoined(event: RoomStateEvent) {
-        serverDiscoveryManager.stopDiscovery()
-        val snapshot = event.toSnapshot()
-        var adaptedAccents: List<Int> = emptyList()
-
-        updateStateAndPushTransport { state ->
-            val stoppedSolo = SoloScheduler.stop(state.soloState)
-            adaptedAccents = AccentPattern.adaptPattern(state.accentLevels, snapshot.beatsPerBar)
-            state.copy(
-                soloState = stoppedSolo,
-                activeRoom = snapshot,
-                accentLevels = adaptedAccents,
-                showRoomSheet = false,
-                showQrScanner = false,
-                isServerEditorExpanded = false,
-                cameraPermissionDeniedHint = false,
-                isConnectingAction = false,
-                roomSheetError = null,
-                snackbarMessage = "Connected to room ${snapshot.roomCode}"
-            )
-        }
-        nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(adaptedAccents))
-
-        viewModelScope.launch {
-            preferences.saveAccentPattern(adaptedAccents)
-            clockSyncManager.startSession(viewModelScope)
-        }
-    }
-
-    private fun handleRoomState(event: RoomStateEvent) {
-        val snapshot = event.toSnapshot()
-        var adaptedAccents: List<Int>? = null
-
-        updateStateAndPushTransport { state ->
-            val currentRoom = state.activeRoom ?: return@updateStateAndPushTransport state
-            if (currentRoom.roomCode != snapshot.roomCode) {
-                return@updateStateAndPushTransport state
-            }
-            val nextAccents = if (state.accentLevels.size != snapshot.beatsPerBar) {
-                AccentPattern.adaptPattern(state.accentLevels, snapshot.beatsPerBar).also {
-                    adaptedAccents = it
-                }
-            } else {
-                state.accentLevels
-            }
-            state.copy(
-                activeRoom = snapshot,
-                accentLevels = nextAccents,
-                roomSheetError = null
-            )
-        }
-
-        adaptedAccents?.let { updated ->
-            nativeEngine.setAccentBitmask(AccentPattern.packToBitmask(updated))
-            viewModelScope.launch {
-                preferences.saveAccentPattern(updated)
-            }
-        }
-    }
-
-    private fun handleConnectionChanged(status: ConnectionStatus, errorMsg: String?) {
-        if (status == ConnectionStatus.DISCONNECTED) {
-            val wasInRoom = _uiState.value.isInRoom
-            if (wasInRoom) {
-                val msg = if (!errorMsg.isNullOrBlank()) {
-                    "Connection lost ($errorMsg) — returned to Solo Mode"
-                } else {
-                    "Server disconnected — returned to Solo Mode"
-                }
-                exitRoomToSoloMode(snackbarMessage = msg)
-            } else {
-                _uiState.update {
-                    it.copy(
-                        connectionStatus = status,
-                        isConnectingAction = false,
-                        roomSheetError = errorMsg ?: it.roomSheetError
-                    )
-                }
-            }
-        } else {
-            _uiState.update { it.copy(connectionStatus = status) }
-        }
-    }
-
-    private fun exitRoomToSoloMode(snackbarMessage: String) {
-        clockSyncManager.stop(resetOffset = true)
-        tapTimestampsNs.clear()
-
-        updateStateAndPushTransport { state ->
-            val prevRoom = state.activeRoom
-            val nextSolo = state.soloState.copy(
-                isPlaying = false,
-                bpm = prevRoom?.bpm ?: state.soloState.bpm,
-                beatsPerBar = prevRoom?.beatsPerBar ?: state.soloState.beatsPerBar,
-                subdivision = state.localSubdivision,
-                localStartTimeNs = 0L,
-                stateVersion = state.soloState.stateVersion + 1L
-            )
-            state.copy(
-                soloState = nextSolo,
-                activeRoom = null,
-                showShareQrSheet = false,
-                isConnectingAction = false,
-                roomSheetError = null,
-                snackbarMessage = snackbarMessage,
-                localScheduledStartNs = 0L
-            )
-        }
-    }
-
-    private fun startDiagnosticsPolling() {
-        diagnosticsJob?.cancel()
-        diagnosticsJob = viewModelScope.launch {
-            while (isActive) {
-                refreshAudioDiagnostics()
-                delay(500L)
-            }
-        }
-    }
-
-    private fun refreshAudioDiagnostics() {
-        val diag = AudioDiagnostics(
-            hardwareLatencyMs = nativeEngine.getMeasuredHardwareLatencyMs(),
-            sampleRateHz = nativeEngine.getSampleRate(),
-            isExclusiveMode = nativeEngine.isExclusiveSharingMode(),
-            audioApiName = nativeEngine.getAudioApiName()
-        )
-        _uiState.update { it.copy(audioDiagnostics = diag) }
-    }
-
-    private fun updateStateAndPushTransport(transform: (AppUiState) -> AppUiState) {
-        synchronized(transportLock) {
-            lateinit var updated: AppUiState
-            _uiState.update { prev ->
-                val candidate = transform(prev)
-                val localStartNs = computeLocalStartTimeNs(candidate)
-                updated = candidate.copy(localScheduledStartNs = localStartNs)
-                updated
-            }
-            pushSnapshotToNativeLocked(updated)
-        }
-    }
-
-    private fun computeLocalStartTimeNs(state: AppUiState): Long {
-        val room = state.activeRoom
-        return if (room != null) {
-            if (room.isPlaying && state.clockSync.isSynced) {
-                ClockSyncMath.serverToLocalTimeNs(room.startServerTimeNs, state.clockSync.offsetNs)
-            } else {
-                0L
-            }
-        } else {
-            if (state.soloState.isPlaying) state.soloState.localStartTimeNs else 0L
-        }
-    }
-
-    private fun pushSnapshotToNativeLocked(state: AppUiState) {
-        val room = state.activeRoom
-        val isInRoom = room != null
-        val shouldPlay = if (isInRoom) {
-            room!!.isPlaying && state.clockSync.isSynced
-        } else {
-            state.soloState.isPlaying
-        }
-
-        if (shouldPlay && !wasEnginePlaying) {
-            audioFocusController.requestFocus()
-        } else if (!shouldPlay && wasEnginePlaying) {
-            audioFocusController.abandonFocus()
-        }
-        wasEnginePlaying = shouldPlay
-
-        val sourceVersion = if (isInRoom) room!!.stateVersion else state.soloState.stateVersion
-        val identity = ScheduleIdentity(
-            isInRoom = isInRoom,
-            sourceVersion = sourceVersion,
-            shouldPlay = shouldPlay,
-            localSubdivision = state.localSubdivision
-        )
-        if (lastScheduleIdentity != identity) {
-            lastScheduleIdentity = identity
-            engineScheduleVersion += 1L
-        }
-
-        val localStartNs = computeLocalStartTimeNs(state)
-        val effectiveVolume = (state.masterVolume * currentFocusGain).coerceIn(0f, 1f)
-
-        nativeEngine.updateTransport(
-            isPlaying = shouldPlay,
-            localStartTimeNs = localStartNs,
-            bpm = state.bpm,
-            beatsPerBar = state.beatsPerBar,
-            subdivision = state.subdivision,
-            manualOffsetNs = state.manualOffsetMs.toLong() * 1_000_000L,
-            volume = effectiveVolume,
-            stateVersion = engineScheduleVersion
-        )
-    }
-
-    private fun RoomStateEvent.toSnapshot(): RoomSnapshot {
-        return RoomSnapshot(
-            roomCode = roomCode,
-            participantCount = participantCount,
-            isPlaying = isPlaying,
-            bpm = bpm,
-            beatsPerBar = beatsPerBar,
-            startServerTimeNs = startServerTimeNs,
-            stateVersion = stateVersion
-        )
-    }
+    fun consumeShouldRequestNotificationPermission(): Boolean =
+        sessionController.consumeShouldRequestNotificationPermission()
 
     override fun onCleared() {
         super.onCleared()
-        diagnosticsJob?.cancel()
         serverDiscoveryManager.destroy()
-        clockSyncManager.stop(resetOffset = true)
-        audioRouteMonitor.stop()
-        audioFocusController.abandonFocus()
-        nativeEngine.stopStream()
-        nativeEngine.destroy()
-        webSocketClient.shutdown()
     }
 }

@@ -30,7 +30,7 @@ class RoomWebSocketClient(
     private val onRoomJoined: (RoomStateEvent) -> Unit,
     private val onRoomState: (RoomStateEvent) -> Unit,
     private val onServerError: (ServerErrorEvent) -> Unit,
-    private val onConnectionStatusChanged: (ConnectionStatus, String?) -> Unit
+    private val onConnectionStatusChanged: (status: ConnectionStatus, errorMessage: String?, isUnexpected: Boolean) -> Unit
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -52,7 +52,7 @@ class RoomWebSocketClient(
     fun connectAndExecute(rawUrl: String, action: () -> Unit) {
         val normalized = ServerUrlNormalizer.normalize(rawUrl)
         if (normalized == null) {
-            onConnectionStatusChanged(ConnectionStatus.DISCONNECTED, "Invalid server URL")
+            onConnectionStatusChanged(ConnectionStatus.DISCONNECTED, "Invalid server URL", false)
             return
         }
         synchronized(socketLock) {
@@ -64,7 +64,7 @@ class RoomWebSocketClient(
             activeUrl = normalized
             isOpen = false
             pendingOnOpen = action
-            onConnectionStatusChanged(ConnectionStatus.CONNECTING, null)
+            onConnectionStatusChanged(ConnectionStatus.CONNECTING, null, false)
 
             val request = try {
                 Request.Builder().url(normalized).build()
@@ -72,7 +72,8 @@ class RoomWebSocketClient(
                 pendingOnOpen = null
                 onConnectionStatusChanged(
                     ConnectionStatus.DISCONNECTED,
-                    e.message ?: "Invalid server URL"
+                    e.message ?: "Invalid server URL",
+                    false
                 )
                 return
             }
@@ -89,7 +90,7 @@ class RoomWebSocketClient(
                             openAction = pendingOnOpen
                             pendingOnOpen = null
                         }
-                        onConnectionStatusChanged(ConnectionStatus.CONNECTED, null)
+                        onConnectionStatusChanged(ConnectionStatus.CONNECTED, null, false)
                         openAction?.invoke()
                     }
 
@@ -114,7 +115,11 @@ class RoomWebSocketClient(
                             }
                         }
                         if (shouldNotify) {
-                            onConnectionStatusChanged(ConnectionStatus.DISCONNECTED, null)
+                            onConnectionStatusChanged(
+                                ConnectionStatus.DISCONNECTED,
+                                reason.ifBlank { null },
+                                true
+                            )
                         }
                     }
 
@@ -135,7 +140,8 @@ class RoomWebSocketClient(
                         if (shouldNotify) {
                             onConnectionStatusChanged(
                                 ConnectionStatus.DISCONNECTED,
-                                t.message ?: "WebSocket connection failed"
+                                t.message ?: "WebSocket connection failed",
+                                true
                             )
                         }
                     }
@@ -149,7 +155,7 @@ class RoomWebSocketClient(
         synchronized(socketLock) {
             closeCurrentSocketLocked()
         }
-        onConnectionStatusChanged(ConnectionStatus.DISCONNECTED, null)
+        onConnectionStatusChanged(ConnectionStatus.DISCONNECTED, null, false)
     }
 
     fun shutdown() {

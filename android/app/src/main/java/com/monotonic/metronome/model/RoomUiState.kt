@@ -111,6 +111,9 @@ data class AppUiState(
     val isServerEditorExpanded: Boolean = false,
     val roomCodeInput: String = "",
     val connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED,
+    val reconnectAttempt: Int = 0,
+    val maxReconnectAttempts: Int = 5,
+    val isFocusPausedInRoom: Boolean = false,
     val isConnectingAction: Boolean = false,
     val roomSheetError: String? = null,
     val showRoomSheet: Boolean = false,
@@ -128,7 +131,11 @@ data class AppUiState(
         get() = activeRoom != null
 
     val isPlaying: Boolean
-        get() = activeRoom?.isPlaying ?: soloState.isPlaying
+        get() = if (activeRoom != null) {
+            activeRoom.isPlaying && !isFocusPausedInRoom
+        } else {
+            soloState.isPlaying
+        }
 
     val bpm: Double
         get() = activeRoom?.bpm ?: soloState.bpm
@@ -142,6 +149,7 @@ data class AppUiState(
     val syncQuality: SyncQuality
         get() {
             if (activeRoom == null) return SyncQuality.OFFLINE
+            if (connectionStatus == ConnectionStatus.RECONNECTING) return SyncQuality.SYNCING
             if (!clockSync.isSynced) return SyncQuality.SYNCING
             return when {
                 clockSync.jitterMs <= 3.0 && clockSync.minRttMs <= 30.0 -> SyncQuality.GOOD

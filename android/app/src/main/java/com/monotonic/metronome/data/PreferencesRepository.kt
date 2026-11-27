@@ -27,7 +27,8 @@ data class UserPreferencesSnapshot(
     val accentPatternRaw: String? = null,
     val soloBpm: Double = 120.0,
     val soloBeatsPerBar: Int = 4,
-    val soloSubdivision: Int = 1
+    val soloSubdivision: Int = 1,
+    val hasRequestedNotificationPermission: Boolean = false
 )
 
 class PreferencesRepository(private val context: Context) {
@@ -47,6 +48,8 @@ class PreferencesRepository(private val context: Context) {
         private val KEY_SOLO_BPM = floatPreferencesKey("solo_bpm")
         private val KEY_SOLO_BEATS_PER_BAR = intPreferencesKey("solo_beats_per_bar")
         private val KEY_SOLO_SUBDIVISION = intPreferencesKey("solo_subdivision")
+        private val KEY_HAS_REQUESTED_NOTIFICATION_PERMISSION =
+            booleanPreferencesKey("has_requested_notification_permission")
     }
 
     val preferencesFlow: Flow<UserPreferencesSnapshot> = context.dataStore.data.map { prefs ->
@@ -64,7 +67,9 @@ class PreferencesRepository(private val context: Context) {
                 .coerceIn(SoloScheduler.MIN_BPM, SoloScheduler.MAX_BPM),
             soloBeatsPerBar = (prefs[KEY_SOLO_BEATS_PER_BAR] ?: 4)
                 .coerceIn(SoloScheduler.MIN_BEATS_PER_BAR, SoloScheduler.MAX_BEATS_PER_BAR),
-            soloSubdivision = if (rawSub in SoloScheduler.VALID_SUBDIVISIONS) rawSub else 1
+            soloSubdivision = if (rawSub in SoloScheduler.VALID_SUBDIVISIONS) rawSub else 1,
+            hasRequestedNotificationPermission =
+                prefs[KEY_HAS_REQUESTED_NOTIFICATION_PERMISSION] ?: false
         )
     }
 
@@ -123,6 +128,12 @@ class PreferencesRepository(private val context: Context) {
             )
             prefs[KEY_SOLO_SUBDIVISION] =
                 if (subdivision in SoloScheduler.VALID_SUBDIVISIONS) subdivision else 1
+        }
+    }
+
+    suspend fun saveHasRequestedNotificationPermission(requested: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_HAS_REQUESTED_NOTIFICATION_PERMISSION] = requested
         }
     }
 }

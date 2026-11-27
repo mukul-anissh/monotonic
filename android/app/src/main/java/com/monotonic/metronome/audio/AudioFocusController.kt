@@ -5,24 +5,57 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 
+enum class AudioFocusAction {
+    RESTORE_FULL_GAIN,
+    DUCK_GAIN,
+    MUTE_TRANSIENT,
+    STOP_PLAYBACK_PERMANENT,
+    IGNORE
+}
+
+object AudioFocusPolicy {
+    fun evaluate(focusChange: Int): AudioFocusAction {
+        return when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> AudioFocusAction.RESTORE_FULL_GAIN
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> AudioFocusAction.DUCK_GAIN
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> AudioFocusAction.MUTE_TRANSIENT
+            AudioManager.AUDIOFOCUS_LOSS -> AudioFocusAction.STOP_PLAYBACK_PERMANENT
+            else -> AudioFocusAction.IGNORE
+        }
+    }
+}
+
 /**
  * Manages Android AudioFocus for active metronome sessions using a normalized
  * gain multiplier (`1.0f` full, `0.35f` ducked, `0.0f` muted) so user master
  * volume preferences remain intact.
+ *
+ * Transient losses duck or mute cleanly without tearing down playback or any
+ * active Sync Room WebSocket; only permanent [AudioManager.AUDIOFOCUS_LOSS]
+ * invokes [onPermanentFocusLoss] to stop local playback (still keeping the
+ * Sync Room WebSocket alive).
  */
 class AudioFocusController(
     context: Context,
-    private val onFocusGainChanged: (Float) -> Unit
+    private val onFocusGainChanged: (Float) -> Unit,
+    private val onPermanentFocusLoss: () -> Unit = {}
 ) {
     private val audioManager =
         context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    private val focusLock = Any()
+    private var hasFocus = false
+
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_GAIN -> onFocusGainChanged(GAIN_FULL)
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> onFocusGainChanged(GAIN_DUCKED)
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS -> onFocusGainChanged(GAIN_MUTED)
+        when (AudioFocusPolicy.evaluate(focusChange)) {
+            AudioFocusAction.RESTORE_FULL_GAIN -> onFocusGainChanged(GAIN_FULL)
+            AudioFocusAction.DUCK_GAIN -> onFocusGainChanged(GAIN_DUCKED)
+            AudioFocusAction.MUTE_TRANSIENT -> onFocusGainChanged(GAIN_MUTED)
+            AudioFocusAction.STOP_PLAYBACK_PERMANENT -> {
+                abandonFocus()
+                onPermanentFocusLoss()
+            }
+            AudioFocusAction.IGNORE -> Unit
         }
     }
 
@@ -38,22 +71,25 @@ class AudioFocusController(
             .setOnAudioFocusChangeListener(focusChangeListener)
             .build()
 
-    private var hasFocus = false
-
     fun requestFocus(): Boolean {
-        if (hasFocus) return true
-        val res = audioManager.requestAudioFocus(focusRequest)
-        hasFocus = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
-        if (hasFocus) {
+        val granted = synchronized(focusLock) {
+            if (hasFocus) return true
+            val res = audioManager.requestAudioFocus(focusRequest)
+            hasFocus = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+            hasFocus
+        }
+        if (granted) {
             onFocusGainChanged(GAIN_FULL)
         }
-        return hasFocus
+        return granted
     }
 
     fun abandonFocus() {
-        if (!hasFocus) return
-        audioManager.abandonAudioFocusRequest(focusRequest)
-        hasFocus = false
+        synchronized(focusLock) {
+            if (!hasFocus) return
+            audioManager.abandonAudioFocusRequest(focusRequest)
+            hasFocus = false
+        }
     }
 
     companion object {

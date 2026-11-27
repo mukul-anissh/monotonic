@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.monotonic.metronome.model.AppUiState
 import com.monotonic.metronome.model.AudioRouteStatus
+import com.monotonic.metronome.model.ConnectionStatus
 import com.monotonic.metronome.model.DiscoveredServer
 import com.monotonic.metronome.model.SyncQuality
 import com.monotonic.metronome.model.TimeSignaturePreset
@@ -504,6 +505,7 @@ private fun StageTopBar(
                         )
                     }
                 } else {
+                    val isReconnecting = uiState.connectionStatus == ConnectionStatus.RECONNECTING
                     val dotColor = when (uiState.syncQuality) {
                         SyncQuality.GOOD -> StatusEmerald
                         SyncQuality.FAIR,
@@ -516,12 +518,20 @@ private fun StageTopBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(dotColor)
-                        )
+                        if (isReconnecting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(10.dp),
+                                strokeWidth = 1.6.dp,
+                                color = StatusAmber
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                            )
+                        }
                         Text(
                             text = room.roomCode,
                             fontSize = 14.sp,
@@ -530,23 +540,33 @@ private fun StageTopBar(
                             letterSpacing = 1.5.sp,
                             color = StudioAmber
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Group,
-                                contentDescription = "Peers",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(14.dp)
-                            )
+                        if (isReconnecting) {
                             Text(
-                                text = "${room.participantCount}",
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.Monospace,
+                                text = "Reconnecting",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = TextSecondary
+                                color = StatusAmber,
+                                maxLines = 1
                             )
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Group,
+                                    contentDescription = "Peers",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "${room.participantCount}",
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextSecondary
+                                )
+                            }
                         }
                     }
                 }
